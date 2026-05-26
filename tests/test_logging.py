@@ -28,6 +28,7 @@ def test_command_log_writes_console_output_and_durations_to_file(tmp_path):
 def test_only_analysis_commands_are_logged():
     assert should_log_command("heating")
     assert should_log_command("analyze-data")
+    assert should_log_command("plot-template")
     assert not should_log_command("gui")
 
 

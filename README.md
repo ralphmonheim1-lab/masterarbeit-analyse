@@ -36,6 +36,7 @@ python -m ma_analyse comfort --output-type plot_analysis_overview
 python -m ma_analyse analyze-data --series-layout separate
 python -m ma_analyse heating --view year --heating-mode single
 python -m ma_analyse cooling --view year --variant-mode single
+python -m ma_analyse plot-template --template heating-year --variants Dimensionierung --rooms "101 lobby"
 python -m ma_analyse all
 ```
 
