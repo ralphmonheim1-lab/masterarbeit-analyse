@@ -20,6 +20,8 @@ Aktivieren der Hooks (einmalig lokal im Repository):
 git config core.hooksPath .githooks
 ```
 
+PowerShell-Hook: Das Hook-Skript versucht zuerst, die Python-Executable aus der Projekt-`.venv` (`.venv\Scripts\python.exe`) zu verwenden. Falls diese nicht vorhanden ist, wird die Umgebungsvariable `PYTHON` genutzt; als letzter Fallback wird `python` aus dem PATH aufgerufen.
+
 Hinweis:
 - Das Setzen von `core.hooksPath` ist lokal zur Arbeitskopie und wird nicht automatisch auf andere Klone übertragen.
 - Team-Mitglieder sollten ebenfalls `git config core.hooksPath .githooks` ausführen oder ein Setup-Script verwenden.
