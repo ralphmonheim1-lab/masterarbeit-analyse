@@ -2,6 +2,49 @@
 
 Alle nennenswerten Aenderungen an `ma_analyse` werden in dieser Datei dokumentiert.
 
+## Unreleased
+
+### Added
+- Keine aktuellen Unreleased-Änderungen.
+
+## 0.3.1 - 2026-05-26
+
+### Added
+- `plot-template` um Comfort-PNGs, Comfort-PDF-Uebersichten, Heating-/Cooling-Barplots und Thermisches-Raumklima-Templates erweitert.
+- Neuer CLI-Befehl `plot-template-examples` erzeugt die reproduzierbare Dokumentationsgalerie unter `docs/examples/plot_templates/` und aktualisiert `docs/plot_template_examples.md`.
+
+### Changed
+- GUI-Fenster bleibt unter Windows auch mit eigener Titelleiste in der Taskleiste sichtbar.
+
+## 0.3.0 - 2026-05-26
+
+### Added
+- Plot-Templates fuer interne Lasten aus Licht, Belegung und Equipment ergaenzt.
+- Plot-Templates fuer Energiebilanz-Uebersichten in Year/Month/Week/Day ergaenzt.
+
+### Changed
+- GUI-Plot-Template-Auswahl erlaubt fuer `internal-loads-room-comparison` mehrere Raeume.
+- Internal-Loads-Templates auf drei sichtbare Datenreihen aus Personen, Geraeten und Beleuchtung ausgerichtet; Week/Day nutzen gestapelte Lastprofil-Balken.
+
+## 0.2.3 - 2026-05-26
+
+### Added
+- `plot-template` um `heating-month`, `heating-week`, `heating-day`, `cooling-year`, `cooling-month`, `cooling-week` und `cooling-day` erweitert.
+- Gemeinsamen Template-Katalog und Timeline-Template-Builder fuer Heating-/Cooling-Zeitansichten ergaenzt.
+- Tests fuer neue Plot-Template-Auswahlwerte, Zeitvalidierung und PNG-Smoke-Laeufe ergaenzt.
+- `docs/PLAN_STATUS.md` als persoenliche Planungssuebersicht ergaenzt.
+- Archivordner `docs/plan_status/` fuer regelmaessige Planstatus-Staende ergaenzt.
+
+### Changed
+- GUI-Template-Auswahl zeigt alle Plot-Templates und blendet Zeitdetails fuer Monats-, Wochen- und Tages-Templates ein.
+- Professor-Agent unter `.github/agents/Professor.md` auf die Masterarbeits-Auswertungssoftware und Dokumentationsregeln ausgerichtet.
+- GUI-Reset springt nach dem Zuruecksetzen wieder auf den ersten Schritt `Befehl`.
+- Planungsuebersicht nach `docs/PLAN_STATUS.md` verschoben; `CHANGELOG.md` bleibt im Projekt-Root.
+- `docs/PLAN_STATUS.md` auf aktive offene Punkte reduziert; Vollstand nach `docs/plan_status/2026-05-26.md` archiviert.
+
+### Docs
+- Plot-Template-Promotion ueber geteilte Helper in `docs/architecture.md` dokumentiert.
+
 ## 0.2.2 - 2026-05-25
 
 ### Added

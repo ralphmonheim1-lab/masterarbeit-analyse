@@ -1,5 +1,50 @@
 """Manuell anpassbare Diagramm-Vorlagen fuer Analyseausgaben."""
 
+from ...core.config import INPUT_DIR
+from .barplots import build_bar_template, validate_bar_template_request
+from .catalog import (
+    COMFORT_ANALYSIS_OVERVIEW_TEMPLATE,
+    COMFORT_ANALYSIS_TEMPLATE,
+    COMFORT_PLOT_OVERVIEW_TEMPLATE,
+    COMFORT_PLOT_TEMPLATE,
+    COOLING_BAR_TEMPLATE,
+    COOLING_DAY_TEMPLATE,
+    COOLING_MONTH_TEMPLATE,
+    COOLING_WEEK_TEMPLATE,
+    COOLING_YEAR_TEMPLATE,
+    ENERGY_BALANCE_DAY_TEMPLATE,
+    ENERGY_BALANCE_MONTH_TEMPLATE,
+    ENERGY_BALANCE_WEEK_TEMPLATE,
+    ENERGY_BALANCE_YEAR_TEMPLATE,
+    HEATING_BAR_TEMPLATE,
+    HEATING_DAY_TEMPLATE,
+    HEATING_MONTH_TEMPLATE,
+    HEATING_WEEK_TEMPLATE,
+    HEATING_YEAR_TEMPLATE,
+    INTERNAL_LOADS_DAY_TEMPLATE,
+    INTERNAL_LOADS_MONTH_TEMPLATE,
+    INTERNAL_LOADS_MONTHLY_SUM_TEMPLATE,
+    INTERNAL_LOADS_ROOM_COMPARISON_TEMPLATE,
+    INTERNAL_LOADS_WEEK_TEMPLATE,
+    INTERNAL_LOADS_YEAR_TEMPLATE,
+    PLOT_TEMPLATE_CHOICES,
+    THERMAL_ROOM_CLIMATE_DAY_TEMPLATE,
+    THERMAL_ROOM_CLIMATE_MONTH_TEMPLATE,
+    THERMAL_ROOM_CLIMATE_WEEK_TEMPLATE,
+    THERMAL_ROOM_CLIMATE_YEAR_TEMPLATE,
+    TIMELINE_TEMPLATE_CHOICES,
+    get_plot_template_spec,
+    is_bar_template,
+    is_comfort_template,
+    is_energy_balance_template,
+    is_internal_loads_template,
+    is_thermal_room_climate_template,
+    is_time_filtered_template,
+    template_requires_single_room,
+    template_uses_overlay_options,
+)
+from .comfort import build_comfort_template, validate_comfort_template_request
+from .energy_balance import build_energy_balance_template, validate_energy_balance_template_request
 from .heating_year import (
     DEFAULT_OUTDOOR_COLUMN,
     DEFAULT_SETPOINT_MAX,
@@ -9,14 +54,158 @@ from .heating_year import (
     DEFAULT_SHOW_SETPOINT_BAND,
     DEFAULT_TEMPERATURE_YMAX,
     DEFAULT_TEMPERATURE_YMIN,
-    HEATING_YEAR_TEMPLATE,
     build_heating_year_template,
     list_heating_year_overlay_sources,
     load_hourly_prn_series,
     validate_template_request,
 )
+from .internal_loads import build_internal_loads_template, validate_internal_loads_template_request
+from .room_climate import build_room_climate_template, validate_room_climate_template_request
+from .timeline import build_timeline_template
+
+
+def build_plot_template(
+    datenbank_dir,
+    input_dir=INPUT_DIR,
+    output_root=None,
+    selected_variants=None,
+    rooms=None,
+    template=HEATING_YEAR_TEMPLATE,
+    setpoint_min=DEFAULT_SETPOINT_MIN,
+    setpoint_max=DEFAULT_SETPOINT_MAX,
+    temperature_ymin=DEFAULT_TEMPERATURE_YMIN,
+    temperature_ymax=DEFAULT_TEMPERATURE_YMAX,
+    outdoor_column=DEFAULT_OUTDOOR_COLUMN,
+    show_setpoint_band=DEFAULT_SHOW_SETPOINT_BAND,
+    show_outdoor_temperature=DEFAULT_SHOW_OUTDOOR_TEMPERATURE,
+    show_operative_temperature=DEFAULT_SHOW_OPERATIVE_TEMPERATURE,
+    overlay_lines=None,
+    fixed_overlays=None,
+    month=None,
+    week=None,
+    day=None,
+    run_id=None,
+    debug=False,
+):
+    """Fuehrt das passende Plot-Template anhand des Template-Namens aus."""
+    if template == HEATING_YEAR_TEMPLATE:
+        return build_heating_year_template(
+            datenbank_dir=datenbank_dir,
+            input_dir=input_dir,
+            output_root=output_root,
+            selected_variants=selected_variants,
+            rooms=rooms,
+            template=template,
+            setpoint_min=setpoint_min,
+            setpoint_max=setpoint_max,
+            temperature_ymin=temperature_ymin,
+            temperature_ymax=temperature_ymax,
+            outdoor_column=outdoor_column,
+            show_setpoint_band=show_setpoint_band,
+            show_outdoor_temperature=show_outdoor_temperature,
+            show_operative_temperature=show_operative_temperature,
+            overlay_lines=overlay_lines,
+            fixed_overlays=fixed_overlays,
+            run_id=run_id,
+            debug=debug,
+        )
+
+    if is_internal_loads_template(template):
+        return build_internal_loads_template(
+            datenbank_dir=datenbank_dir,
+            output_root=output_root,
+            selected_variants=selected_variants,
+            rooms=rooms,
+            template=template,
+            month=month,
+            week=week,
+            day=day,
+            run_id=run_id,
+            debug=debug,
+        )
+
+    if is_comfort_template(template):
+        return build_comfort_template(
+            datenbank_dir=datenbank_dir,
+            output_root=output_root,
+            selected_variants=selected_variants,
+            rooms=rooms,
+            template=template,
+            run_id=run_id,
+            debug=debug,
+        )
+
+    if is_bar_template(template):
+        return build_bar_template(
+            datenbank_dir=datenbank_dir,
+            output_root=output_root,
+            selected_variants=selected_variants,
+            rooms=rooms,
+            template=template,
+            run_id=run_id,
+            debug=debug,
+        )
+
+    if is_thermal_room_climate_template(template):
+        return build_room_climate_template(
+            datenbank_dir=datenbank_dir,
+            input_dir=input_dir,
+            output_root=output_root,
+            selected_variants=selected_variants,
+            rooms=rooms,
+            template=template,
+            setpoint_min=setpoint_min,
+            setpoint_max=setpoint_max,
+            month=month,
+            week=week,
+            day=day,
+            run_id=run_id,
+            debug=debug,
+        )
+
+    if is_energy_balance_template(template):
+        return build_energy_balance_template(
+            datenbank_dir=datenbank_dir,
+            input_dir=input_dir,
+            output_root=output_root,
+            selected_variants=selected_variants,
+            rooms=rooms,
+            template=template,
+            month=month,
+            week=week,
+            day=day,
+            run_id=run_id,
+            debug=debug,
+        )
+
+    return build_timeline_template(
+        datenbank_dir=datenbank_dir,
+        output_root=output_root,
+        selected_variants=selected_variants,
+        rooms=rooms,
+        template=template,
+        month=month,
+        week=week,
+        day=day,
+        run_id=run_id,
+        debug=debug,
+    )
+
 
 __all__ = [
+    "COMFORT_ANALYSIS_OVERVIEW_TEMPLATE",
+    "COMFORT_ANALYSIS_TEMPLATE",
+    "COMFORT_PLOT_OVERVIEW_TEMPLATE",
+    "COMFORT_PLOT_TEMPLATE",
+    "COOLING_BAR_TEMPLATE",
+    "COOLING_DAY_TEMPLATE",
+    "COOLING_MONTH_TEMPLATE",
+    "COOLING_WEEK_TEMPLATE",
+    "COOLING_YEAR_TEMPLATE",
+    "ENERGY_BALANCE_DAY_TEMPLATE",
+    "ENERGY_BALANCE_MONTH_TEMPLATE",
+    "ENERGY_BALANCE_WEEK_TEMPLATE",
+    "ENERGY_BALANCE_YEAR_TEMPLATE",
     "DEFAULT_OUTDOOR_COLUMN",
     "DEFAULT_SETPOINT_MAX",
     "DEFAULT_SETPOINT_MIN",
@@ -25,9 +214,46 @@ __all__ = [
     "DEFAULT_SHOW_SETPOINT_BAND",
     "DEFAULT_TEMPERATURE_YMAX",
     "DEFAULT_TEMPERATURE_YMIN",
+    "HEATING_DAY_TEMPLATE",
+    "HEATING_BAR_TEMPLATE",
+    "HEATING_MONTH_TEMPLATE",
+    "HEATING_WEEK_TEMPLATE",
     "HEATING_YEAR_TEMPLATE",
+    "INTERNAL_LOADS_DAY_TEMPLATE",
+    "INTERNAL_LOADS_MONTH_TEMPLATE",
+    "INTERNAL_LOADS_MONTHLY_SUM_TEMPLATE",
+    "INTERNAL_LOADS_ROOM_COMPARISON_TEMPLATE",
+    "INTERNAL_LOADS_WEEK_TEMPLATE",
+    "INTERNAL_LOADS_YEAR_TEMPLATE",
+    "PLOT_TEMPLATE_CHOICES",
+    "THERMAL_ROOM_CLIMATE_DAY_TEMPLATE",
+    "THERMAL_ROOM_CLIMATE_MONTH_TEMPLATE",
+    "THERMAL_ROOM_CLIMATE_WEEK_TEMPLATE",
+    "THERMAL_ROOM_CLIMATE_YEAR_TEMPLATE",
+    "TIMELINE_TEMPLATE_CHOICES",
+    "build_bar_template",
+    "build_comfort_template",
+    "build_plot_template",
+    "build_energy_balance_template",
     "build_heating_year_template",
+    "build_internal_loads_template",
+    "build_room_climate_template",
+    "build_timeline_template",
+    "get_plot_template_spec",
+    "is_bar_template",
+    "is_comfort_template",
+    "is_energy_balance_template",
+    "is_internal_loads_template",
+    "is_time_filtered_template",
+    "is_thermal_room_climate_template",
     "list_heating_year_overlay_sources",
     "load_hourly_prn_series",
+    "template_requires_single_room",
+    "template_uses_overlay_options",
+    "validate_bar_template_request",
+    "validate_comfort_template_request",
+    "validate_energy_balance_template_request",
+    "validate_internal_loads_template_request",
+    "validate_room_climate_template_request",
     "validate_template_request",
 ]

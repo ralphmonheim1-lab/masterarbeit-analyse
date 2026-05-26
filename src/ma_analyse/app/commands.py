@@ -4,14 +4,16 @@ from __future__ import annotations
 
 import argparse
 import os
+import shutil
 import time
+from pathlib import Path
 
 from ..analysis.comfort.main import get_run_id, process_analysis, process_overview, process_plots
 from ..analysis.cooling import main as compare_cooling_comparison
 from ..analysis.excel import build_excel_report
 from ..analysis.heating import main as compare_heating_comparison
-from ..analysis.templates import build_heating_year_template
-from ..core.config import OUTPUT_DIR, ROOMS, TEST_OUTPUT_DIR
+from ..analysis.templates import build_plot_template
+from ..core.config import DOCS_DIR, OUTPUT_DIR, ROOMS, TEST_OUTPUT_DIR
 from ..core.logging import format_duration, timed_step
 from ..preprocessing.prepare import process_all_variants
 
@@ -205,7 +207,7 @@ def run_plot_template(args):
     if not getattr(args, "output_root_explicit", False) and output_root == OUTPUT_DIR:
         output_root = TEST_OUTPUT_DIR
 
-    output_files = build_heating_year_template(
+    output_files = build_plot_template(
         datenbank_dir=args.datenbank_dir,
         input_dir=args.input_dir,
         output_root=output_root,
@@ -221,6 +223,10 @@ def run_plot_template(args):
         show_outdoor_temperature=getattr(args, "show_outdoor_temperature", True),
         show_operative_temperature=getattr(args, "show_operative_temperature", True),
         overlay_lines=getattr(args, "overlay_lines", None),
+        fixed_overlays=getattr(args, "fixed_overlays", None),
+        month=getattr(args, "month", None),
+        week=getattr(args, "week", None),
+        day=getattr(args, "day", None),
         run_id=getattr(args, "run_id", None),
         debug=getattr(args, "debug", False),
     )
@@ -231,6 +237,321 @@ def run_plot_template(args):
         return
 
     print(f"Plot-Template gespeichert: {output_files}")
+
+
+def _get_plot_template_example_specs() -> list[dict[str, object]]:
+    """Definiert stabile Beispiele fuer alle Plot-Templates."""
+    examples = [
+        {
+            "template": "heating-year",
+            "rooms": ["208 office"],
+            "kwargs": {},
+            "command": 'python -m ma_analyse plot-template --template heating-year --variants Dimensionierung --rooms "208 office"',
+        },
+        {
+            "template": "heating-month",
+            "rooms": ["208 office"],
+            "kwargs": {"month": "Jul"},
+            "command": 'python -m ma_analyse plot-template --template heating-month --variants Dimensionierung --rooms "208 office" --month Jul',
+        },
+        {
+            "template": "heating-week",
+            "rooms": ["208 office"],
+            "kwargs": {"week": 29},
+            "command": 'python -m ma_analyse plot-template --template heating-week --variants Dimensionierung --rooms "208 office" --week 29',
+        },
+        {
+            "template": "heating-day",
+            "rooms": ["208 office"],
+            "kwargs": {"month": "Jul", "day": 20},
+            "command": 'python -m ma_analyse plot-template --template heating-day --variants Dimensionierung --rooms "208 office" --month Jul --day 20',
+        },
+        {
+            "template": "cooling-year",
+            "rooms": ["208 office"],
+            "kwargs": {},
+            "command": 'python -m ma_analyse plot-template --template cooling-year --variants Dimensionierung --rooms "208 office"',
+        },
+        {
+            "template": "cooling-month",
+            "rooms": ["208 office"],
+            "kwargs": {"month": "Jul"},
+            "command": 'python -m ma_analyse plot-template --template cooling-month --variants Dimensionierung --rooms "208 office" --month Jul',
+        },
+        {
+            "template": "cooling-week",
+            "rooms": ["208 office"],
+            "kwargs": {"week": 29},
+            "command": 'python -m ma_analyse plot-template --template cooling-week --variants Dimensionierung --rooms "208 office" --week 29',
+        },
+        {
+            "template": "cooling-day",
+            "rooms": ["208 office"],
+            "kwargs": {"month": "Jul", "day": 20},
+            "command": 'python -m ma_analyse plot-template --template cooling-day --variants Dimensionierung --rooms "208 office" --month Jul --day 20',
+        },
+        {
+            "template": "heating-bar",
+            "rooms": ROOMS.copy(),
+            "kwargs": {},
+            "command": 'python -m ma_analyse plot-template --template heating-bar --variants Dimensionierung --rooms "{}"'.format(
+                ",".join(ROOMS)
+            ),
+        },
+        {
+            "template": "cooling-bar",
+            "rooms": ROOMS.copy(),
+            "kwargs": {},
+            "command": 'python -m ma_analyse plot-template --template cooling-bar --variants Dimensionierung --rooms "{}"'.format(
+                ",".join(ROOMS)
+            ),
+        },
+        {
+            "template": "comfort-plot",
+            "rooms": ["208 office"],
+            "kwargs": {},
+            "command": 'python -m ma_analyse plot-template --template comfort-plot --variants Dimensionierung --rooms "208 office"',
+        },
+        {
+            "template": "comfort-analysis",
+            "rooms": ["208 office"],
+            "kwargs": {},
+            "command": 'python -m ma_analyse plot-template --template comfort-analysis --variants Dimensionierung --rooms "208 office"',
+        },
+        {
+            "template": "comfort-plot-overview",
+            "rooms": ROOMS.copy(),
+            "kwargs": {},
+            "command": 'python -m ma_analyse plot-template --template comfort-plot-overview --variants Dimensionierung --rooms "{}"'.format(
+                ",".join(ROOMS)
+            ),
+        },
+        {
+            "template": "comfort-analysis-overview",
+            "rooms": ROOMS.copy(),
+            "kwargs": {},
+            "command": 'python -m ma_analyse plot-template --template comfort-analysis-overview --variants Dimensionierung --rooms "{}"'.format(
+                ",".join(ROOMS)
+            ),
+        },
+        {
+            "template": "internal-loads-year",
+            "rooms": ["208 office"],
+            "kwargs": {},
+            "command": 'python -m ma_analyse plot-template --template internal-loads-year --variants Dimensionierung --rooms "208 office"',
+        },
+        {
+            "template": "internal-loads-month",
+            "rooms": ["208 office"],
+            "kwargs": {"month": "Jul"},
+            "command": 'python -m ma_analyse plot-template --template internal-loads-month --variants Dimensionierung --rooms "208 office" --month Jul',
+        },
+        {
+            "template": "internal-loads-week",
+            "rooms": ["208 office"],
+            "kwargs": {"week": 29},
+            "command": 'python -m ma_analyse plot-template --template internal-loads-week --variants Dimensionierung --rooms "208 office" --week 29',
+        },
+        {
+            "template": "internal-loads-day",
+            "rooms": ["208 office"],
+            "kwargs": {"month": "Jul", "day": 20},
+            "command": 'python -m ma_analyse plot-template --template internal-loads-day --variants Dimensionierung --rooms "208 office" --month Jul --day 20',
+        },
+        {
+            "template": "internal-loads-monthly-sum",
+            "rooms": ["208 office"],
+            "kwargs": {},
+            "command": 'python -m ma_analyse plot-template --template internal-loads-monthly-sum --variants Dimensionierung --rooms "208 office"',
+        },
+        {
+            "template": "internal-loads-room-comparison",
+            "rooms": ROOMS.copy(),
+            "kwargs": {},
+            "command": 'python -m ma_analyse plot-template --template internal-loads-room-comparison --variants Dimensionierung --rooms "{}"'.format(
+                ",".join(ROOMS)
+            ),
+        },
+        {
+            "template": "energy-balance-year",
+            "rooms": ["208 office"],
+            "kwargs": {},
+            "command": 'python -m ma_analyse plot-template --template energy-balance-year --variants Dimensionierung --rooms "208 office"',
+        },
+        {
+            "template": "energy-balance-month",
+            "rooms": ["208 office"],
+            "kwargs": {"month": "Jul"},
+            "command": 'python -m ma_analyse plot-template --template energy-balance-month --variants Dimensionierung --rooms "208 office" --month Jul',
+        },
+        {
+            "template": "energy-balance-week",
+            "rooms": ["208 office"],
+            "kwargs": {"week": 29},
+            "command": 'python -m ma_analyse plot-template --template energy-balance-week --variants Dimensionierung --rooms "208 office" --week 29',
+        },
+        {
+            "template": "energy-balance-day",
+            "rooms": ["208 office"],
+            "kwargs": {"month": "Jul", "day": 20},
+            "command": 'python -m ma_analyse plot-template --template energy-balance-day --variants Dimensionierung --rooms "208 office" --month Jul --day 20',
+        },
+        {
+            "template": "thermal-room-climate-year",
+            "rooms": ["208 office"],
+            "kwargs": {},
+            "command": 'python -m ma_analyse plot-template --template thermal-room-climate-year --variants Dimensionierung --rooms "208 office"',
+        },
+        {
+            "template": "thermal-room-climate-month",
+            "rooms": ["208 office"],
+            "kwargs": {"month": "Jul"},
+            "command": 'python -m ma_analyse plot-template --template thermal-room-climate-month --variants Dimensionierung --rooms "208 office" --month Jul',
+        },
+        {
+            "template": "thermal-room-climate-week",
+            "rooms": ["208 office"],
+            "kwargs": {"week": 29},
+            "command": 'python -m ma_analyse plot-template --template thermal-room-climate-week --variants Dimensionierung --rooms "208 office" --week 29',
+        },
+        {
+            "template": "thermal-room-climate-day",
+            "rooms": ["208 office"],
+            "kwargs": {"month": "Jul", "day": 20},
+            "command": 'python -m ma_analyse plot-template --template thermal-room-climate-day --variants Dimensionierung --rooms "208 office" --month Jul --day 20',
+        },
+    ]
+    return examples
+
+
+def _render_gallery_markdown(entries: list[dict[str, object]], output_file: Path) -> None:
+    lines = [
+        "# Plot-Template Beispiele",
+        "",
+        "Diese Galerie zeigt stabil erzeugte Beispielbilder und -dokumente fuer alle `plot-template`-Vorlagen.",
+        "",
+        "Die Bilder liegen unter `docs/examples/plot_templates/`.",
+        "",
+    ]
+
+    groups = {
+        "Heating": [
+            "heating-year",
+            "heating-month",
+            "heating-week",
+            "heating-day",
+        ],
+        "Cooling": [
+            "cooling-year",
+            "cooling-month",
+            "cooling-week",
+            "cooling-day",
+        ],
+        "Barplots": ["heating-bar", "cooling-bar"],
+        "Comfort": [
+            "comfort-plot",
+            "comfort-analysis",
+            "comfort-plot-overview",
+            "comfort-analysis-overview",
+        ],
+        "Energy Balance": [
+            "energy-balance-year",
+            "energy-balance-month",
+            "energy-balance-week",
+            "energy-balance-day",
+        ],
+        "Internal Loads": [
+            "internal-loads-year",
+            "internal-loads-month",
+            "internal-loads-week",
+            "internal-loads-day",
+            "internal-loads-monthly-sum",
+            "internal-loads-room-comparison",
+        ],
+        "Thermal Room Climate": [
+            "thermal-room-climate-year",
+            "thermal-room-climate-month",
+            "thermal-room-climate-week",
+            "thermal-room-climate-day",
+        ],
+    }
+
+    entry_by_template = {entry["template"]: entry for entry in entries}
+
+    for heading, templates in groups.items():
+        lines.append(f"## {heading}")
+        lines.append("")
+        for template in templates:
+            entry = entry_by_template[template]
+            target_file = entry["target_file"].name
+            lines.append(f"### `{template}`")
+            lines.append("")
+            lines.append(f"**Beispielbefehl:** `{entry['command']}`")
+            lines.append("")
+            if target_file.lower().endswith(".pdf"):
+                lines.append(f"[PDF-Ausgabe](examples/plot_templates/{target_file})")
+            else:
+                lines.append(f"![{template}](examples/plot_templates/{target_file})")
+            lines.append("")
+        lines.append("")
+
+    lines.extend(
+        [
+            "---",
+            "",
+            "Diese Beispiele werden reproduzierbar mit dem Befehl `python -m ma_analyse plot-template-examples` erzeugt.",
+            "Wenn sich das Aussehen von Plot-Templates aendert, ersetzen neue Generierungsläufe die vorhandenen Dateien.",
+            "",
+        ]
+    )
+
+    output_file.write_text("\n".join(lines), encoding="utf-8")
+
+
+def _copy_gallery_file(source: str | Path, target_dir: Path, template: str) -> Path:
+    target_dir.mkdir(parents=True, exist_ok=True)
+    source_path = Path(source)
+    target_path = target_dir / f"{template}{source_path.suffix}"
+    shutil.copy2(source_path, target_path)
+    return target_path
+
+
+def run_plot_template_examples(args):
+    """Erzeugt die Dokumentationsgalerie fuer alle Plot-Template-Beispiele."""
+    gallery_dir = DOCS_DIR / "examples" / "plot_templates"
+    gallery_dir.mkdir(parents=True, exist_ok=True)
+    for existing_file in gallery_dir.iterdir():
+        if existing_file.is_file():
+            existing_file.unlink()
+
+    generated_root = Path(TEST_OUTPUT_DIR) / "plot_template_examples"
+    generated_root.mkdir(parents=True, exist_ok=True)
+
+    example_specs = _get_plot_template_example_specs()
+    output_entries = []
+    for example in example_specs:
+        output = build_plot_template(
+            datenbank_dir=args.datenbank_dir,
+            input_dir=args.input_dir,
+            output_root=generated_root,
+            selected_variants=["Dimensionierung"],
+            rooms=example["rooms"],
+            template=example["template"],
+            run_id="plot_template_examples",
+            month=example["kwargs"].get("month"),
+            week=example["kwargs"].get("week"),
+            day=example["kwargs"].get("day"),
+            debug=args.debug,
+        )
+        if isinstance(output, list):
+            output = output[0]
+        target = _copy_gallery_file(output, gallery_dir, example["template"])
+        output_entries.append({**example, "target_file": target})
+
+    markdown_file = DOCS_DIR / "plot_template_examples.md"
+    _render_gallery_markdown(output_entries, markdown_file)
+    print(f"Beispielgalerie erzeugt: {markdown_file}")
+    print(f"Bilder erzeugt: {len(output_entries)} Dateien")
 
 
 def run_comfort(args):
@@ -310,6 +631,10 @@ def build_runtime_args(
         "show_outdoor_temperature": getattr(args, "show_outdoor_temperature", True),
         "show_operative_temperature": getattr(args, "show_operative_temperature", True),
         "overlay_lines": getattr(args, "overlay_lines", None),
+        "fixed_overlays": getattr(args, "fixed_overlays", None),
+        "month": getattr(args, "month", None),
+        "week": getattr(args, "week", None),
+        "day": getattr(args, "day", None),
     }
     if plot_template_options:
         plot_template_defaults.update(plot_template_options)
@@ -324,9 +649,9 @@ def build_runtime_args(
         variants=variants,
         rooms=rooms if rooms is not None else ROOMS.copy(),
         view=heating_defaults["view"],
-        month=heating_defaults["month"],
-        week=heating_defaults["week"],
-        day=heating_defaults["day"],
+        month=plot_template_defaults["month"] if plot_template_options else heating_defaults["month"],
+        week=plot_template_defaults["week"] if plot_template_options else heating_defaults["week"],
+        day=plot_template_defaults["day"] if plot_template_options else heating_defaults["day"],
         heating_series_layout=heating_defaults["series_layout"],
         heating_mode=heating_mode or getattr(args, "heating_mode", None) or "compare",
         plot_single=comfort_defaults["plot_single"],
@@ -345,6 +670,7 @@ def build_runtime_args(
         show_outdoor_temperature=plot_template_defaults["show_outdoor_temperature"],
         show_operative_temperature=plot_template_defaults["show_operative_temperature"],
         overlay_lines=plot_template_defaults["overlay_lines"],
+        fixed_overlays=plot_template_defaults["fixed_overlays"],
     )
 
 
@@ -569,6 +895,11 @@ def dispatch_command(args):
         with timed_step(STEP_TITLES["plot_template"]):
             ensure_required_data(args, ["plot_template"])
             run_plot_template(args)
+        return
+
+    if args.command == "plot-template-examples":
+        with timed_step("plot-template-examples (Beispielgalerie erzeugen)"):
+            run_plot_template_examples(args)
         return
 
     if args.command == "gui":

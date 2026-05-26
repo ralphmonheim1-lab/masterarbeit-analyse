@@ -227,9 +227,13 @@ def add_timeline_axis(figure, ax, axis_config):
     )
     timeline_ax.add_patch(arrow)
 
+    for tick in axis_config.get("grid_ticks", axis_config["ticks"]):
+        tick_line = timeline_ax.vlines(tick, line_y, line_y + 0.10, color=TECHNICAL_TEXT_COLOR, linewidth=0.7)
+        tick_line.set_clip_on(False)
+
     x_start, x_end = axis_config["x_lim"]
     for tick, label in zip(axis_config["ticks"], axis_config["labels"], strict=False):
-        tick_line = timeline_ax.vlines(tick, line_y - 0.07, line_y + 0.07, color=TECHNICAL_TEXT_COLOR, linewidth=0.8)
+        tick_line = timeline_ax.vlines(tick, line_y - 0.10, line_y, color=TECHNICAL_TEXT_COLOR, linewidth=0.8)
         tick_line.set_clip_on(False)
         if tick == x_start:
             label_align = "left"

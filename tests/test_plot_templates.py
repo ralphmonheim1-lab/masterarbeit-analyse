@@ -1,6 +1,7 @@
 from pathlib import Path
 
 import pandas as pd
+import pytest
 
 from ma_analyse.analysis.components.time_windows import (
     MONTH_BOUNDARIES,
@@ -9,6 +10,7 @@ from ma_analyse.analysis.components.time_windows import (
 )
 from ma_analyse.analysis.templates import (
     build_heating_year_template,
+    build_plot_template,
     list_heating_year_overlay_sources,
     load_hourly_prn_series,
     validate_template_request,
@@ -28,8 +30,72 @@ def test_validate_template_request_requires_variant_and_single_room():
     )
 
     assert "plot-template erwartet mindestens eine Variante." in errors
-    assert "plot-template erwartet genau einen Raum." in errors
+    assert "Dieses plot-template erwartet genau einen Raum." in errors
     assert "setpoint-min muss kleiner als setpoint-max sein." in errors
+
+
+def test_validate_template_request_requires_time_selection_for_filtered_templates():
+    month_errors = validate_template_request(
+        "heating-month",
+        ["Dimensionierung"],
+        ["101 lobby"],
+        21,
+        26,
+        -20,
+        40,
+    )
+    week_errors = validate_template_request(
+        "cooling-week",
+        ["Dimensionierung"],
+        ["101 lobby"],
+        21,
+        26,
+        -20,
+        40,
+    )
+    day_errors = validate_template_request(
+        "cooling-day",
+        ["Dimensionierung"],
+        ["101 lobby"],
+        21,
+        26,
+        -20,
+        40,
+        month="Feb",
+    )
+
+    assert "plot-template month erwartet --month." in month_errors
+    assert "plot-template week erwartet --week." in week_errors
+    assert "plot-template day erwartet --day." in day_errors
+
+
+def test_validate_template_request_allows_multiple_rooms_for_internal_room_comparison():
+    errors = validate_template_request(
+        "internal-loads-room-comparison",
+        ["Dimensionierung"],
+        ["101 lobby", "109 office"],
+        21,
+        26,
+        -20,
+        40,
+    )
+
+    assert errors == []
+
+
+def test_validate_template_request_allows_multiple_rooms_for_overview_and_bar_templates():
+    for template in ["comfort-plot-overview", "comfort-analysis-overview", "heating-bar", "cooling-bar"]:
+        errors = validate_template_request(
+            template,
+            ["Dimensionierung"],
+            ["101 lobby", "109 office"],
+            21,
+            26,
+            -20,
+            40,
+        )
+
+        assert errors == []
 
 
 def test_load_hourly_prn_series_aggregates_subhourly_values(tmp_path):
@@ -151,6 +217,349 @@ def test_build_heating_year_template_creates_png_for_multiple_variants(tmp_path)
         assert output_path.stat().st_size > 1000
 
 
+@pytest.mark.parametrize(
+    ("template", "expected_name", "kwargs"),
+    [
+        ("heating-month", "101_lobby_heating_month_template.png", {"month": "Jan"}),
+        ("heating-week", "101_lobby_heating_week_template.png", {"week": 7}),
+        ("heating-day", "101_lobby_heating_day_template.png", {"month": "Feb", "day": 15}),
+        ("cooling-year", "101_lobby_cooling_year_template.png", {}),
+        ("cooling-month", "101_lobby_cooling_month_template.png", {"month": "Jan"}),
+        ("cooling-week", "101_lobby_cooling_week_template.png", {"week": 7}),
+        ("cooling-day", "101_lobby_cooling_day_template.png", {"month": "Feb", "day": 15}),
+    ],
+)
+def test_build_plot_template_creates_timeline_pngs(tmp_path, template, expected_name, kwargs):
+    datenbank_dir = tmp_path / "database"
+    output_root = tmp_path / "output"
+    variant_database = datenbank_dir / "Dimensionierung_nutzdaten"
+    variant_database.mkdir(parents=True)
+
+    hours = list(range(1200))
+    pd.DataFrame(
+        {
+            "time": hours,
+            "zone_energy_q_heat": [1000 if hour % 24 < 12 else 0 for hour in hours],
+            "zone_energy_q_cool": [700 if 10 <= hour % 24 < 18 else 0 for hour in hours],
+        }
+    ).to_csv(variant_database / "101_lobby.csv", index=False)
+
+    output_file = build_plot_template(
+        datenbank_dir=datenbank_dir,
+        output_root=output_root,
+        selected_variants=["Dimensionierung"],
+        rooms=["101 lobby"],
+        template=template,
+        run_id="timeline-templates",
+        **kwargs,
+    )
+
+    output_path = Path(output_file)
+    assert output_path.exists()
+    assert output_path.stat().st_size > 1000
+    assert output_path.parts[-4:] == (
+        "PlotTemplates",
+        "timeline-templates",
+        "Dimensionierung",
+        expected_name,
+    )
+
+
+@pytest.mark.parametrize(
+    ("template", "expected_name", "kwargs"),
+    [
+        ("energy-balance-year", "101_lobby_energy_balance_year_template.png", {}),
+        ("energy-balance-month", "101_lobby_energy_balance_month_template.png", {"month": "Jan"}),
+        ("energy-balance-week", "101_lobby_energy_balance_week_template.png", {"week": 7}),
+        ("energy-balance-day", "101_lobby_energy_balance_day_template.png", {"month": "Feb", "day": 15}),
+    ],
+)
+def test_build_plot_template_creates_energy_balance_pngs(tmp_path, template, expected_name, kwargs):
+    datenbank_dir = tmp_path / "database"
+    input_dir = tmp_path / "input"
+    output_root = tmp_path / "output"
+    variant_database = datenbank_dir / "Dimensionierung_nutzdaten"
+    variant_input = input_dir / "Dimensionierung"
+    variant_database.mkdir(parents=True)
+    variant_input.mkdir(parents=True)
+
+    hours = list(range(1200))
+    pd.DataFrame(
+        {
+            "time": hours,
+            "zone_energy_q_heat": [600 if hour % 24 < 7 else 0 for hour in hours],
+            "zone_energy_qventil": [-80 if hour % 24 < 6 else 120 for hour in hours],
+            "zone_energy_q_light": [90 if 7 <= hour % 24 < 19 else 0 for hour in hours],
+            "zone_energy_qwcb": [-160 + (hour % 24) * 4 for hour in hours],
+            "zone_energy_ql_a": [-50 if hour % 24 < 8 else 20 for hour in hours],
+            "zone_energy_q_cool": [-350 if 12 <= hour % 24 < 18 else 0 for hour in hours],
+            "zone_energy_qintw": [-120 if hour % 24 < 10 else 180 for hour in hours],
+            "zone_energy_q_occ": [70 if 8 <= hour % 24 < 17 else 0 for hour in hours],
+            "zone_energy_qwind": [240 if 9 <= hour % 24 < 16 else -20 for hour in hours],
+            "zone_energy_q_equip": [60 if 6 <= hour % 24 < 22 else 15 for hour in hours],
+            "temperatures_tairmean": [21 + (hour % 24) * 0.2 for hour in hours],
+        }
+    ).to_csv(variant_database / "101_lobby.csv", index=False)
+    report_lines = ["# time order tair tout"]
+    for hour in hours:
+        report_lines.append(f"{hour}.0 1.0 {5 + (hour % 24) * 0.5} {4 + (hour % 24) * 0.4}")
+    (variant_input / "REPORT-AUX.prn").write_text("\n".join(report_lines), encoding="utf-8")
+
+    output_file = build_plot_template(
+        datenbank_dir=datenbank_dir,
+        input_dir=input_dir,
+        output_root=output_root,
+        selected_variants=["Dimensionierung"],
+        rooms=["101 lobby"],
+        template=template,
+        run_id="energy-balance",
+        **kwargs,
+    )
+
+    output_path = Path(output_file)
+    assert output_path.exists()
+    assert output_path.stat().st_size > 1000
+    assert output_path.parts[-4:] == (
+        "PlotTemplates",
+        "energy-balance",
+        "Dimensionierung",
+        expected_name,
+    )
+
+
+@pytest.mark.parametrize(
+    ("template", "expected_name", "kwargs"),
+    [
+        ("internal-loads-year", "101_lobby_internal_loads_year_template.png", {}),
+        ("internal-loads-month", "101_lobby_internal_loads_month_template.png", {"month": "Jan"}),
+        ("internal-loads-week", "101_lobby_internal_loads_week_template.png", {"week": 7}),
+        ("internal-loads-day", "101_lobby_internal_loads_day_template.png", {"month": "Feb", "day": 15}),
+        ("internal-loads-monthly-sum", "101_lobby_internal_loads_monthly_sum_template.png", {}),
+    ],
+)
+def test_build_plot_template_creates_internal_loads_single_room_pngs(tmp_path, template, expected_name, kwargs):
+    datenbank_dir = tmp_path / "database"
+    output_root = tmp_path / "output"
+    variant_database = datenbank_dir / "Dimensionierung_nutzdaten"
+    variant_database.mkdir(parents=True)
+
+    hours = list(range(1200))
+    pd.DataFrame(
+        {
+            "time": hours,
+            "zone_energy_q_light": [120 if 7 <= hour % 24 < 19 else 0 for hour in hours],
+            "zone_energy_q_occ": [80 if 8 <= hour % 24 < 17 else 0 for hour in hours],
+            "zone_energy_q_equip": [60 if 6 <= hour % 24 < 22 else 15 for hour in hours],
+        }
+    ).to_csv(variant_database / "101_lobby.csv", index=False)
+
+    output_file = build_plot_template(
+        datenbank_dir=datenbank_dir,
+        output_root=output_root,
+        selected_variants=["Dimensionierung"],
+        rooms=["101 lobby"],
+        template=template,
+        run_id="internal-loads",
+        **kwargs,
+    )
+
+    output_path = Path(output_file)
+    assert output_path.exists()
+    assert output_path.stat().st_size > 1000
+    assert output_path.parts[-4:] == (
+        "PlotTemplates",
+        "internal-loads",
+        "Dimensionierung",
+        expected_name,
+    )
+
+
+def test_build_plot_template_creates_internal_loads_room_comparison_png(tmp_path):
+    datenbank_dir = tmp_path / "database"
+    output_root = tmp_path / "output"
+    variant_database = datenbank_dir / "Dimensionierung_nutzdaten"
+    variant_database.mkdir(parents=True)
+
+    hours = list(range(48))
+    for room_stub, offset in [("101_lobby", 0), ("109_office", 30)]:
+        pd.DataFrame(
+            {
+                "time": hours,
+                "zone_energy_q_light": [100 + offset if 7 <= hour % 24 < 19 else 0 for hour in hours],
+                "zone_energy_q_occ": [70 + offset if 8 <= hour % 24 < 17 else 0 for hour in hours],
+                "zone_energy_q_equip": [50 + offset for _ in hours],
+            }
+        ).to_csv(variant_database / f"{room_stub}.csv", index=False)
+
+    output_file = build_plot_template(
+        datenbank_dir=datenbank_dir,
+        output_root=output_root,
+        selected_variants=["Dimensionierung"],
+        rooms=["101 lobby", "109 office"],
+        template="internal-loads-room-comparison",
+        run_id="internal-loads-rooms",
+    )
+
+    output_path = Path(output_file)
+    assert output_path.exists()
+    assert output_path.stat().st_size > 1000
+    assert output_path.parts[-4:] == (
+        "PlotTemplates",
+        "internal-loads-rooms",
+        "Dimensionierung",
+        "internal_loads_room_comparison_template.png",
+    )
+
+
+@pytest.mark.parametrize(
+    ("template", "expected_name", "rooms"),
+    [
+        ("comfort-plot", "101_lobby_comfort_plot_template.png", ["101 lobby"]),
+        ("comfort-analysis", "101_lobby_comfort_analysis_template.png", ["101 lobby"]),
+        ("comfort-plot-overview", "comfort_plot_overview_template.pdf", ["101 lobby", "109 office"]),
+        ("comfort-analysis-overview", "comfort_analysis_overview_template.pdf", ["101 lobby", "109 office"]),
+    ],
+)
+def test_build_plot_template_creates_comfort_outputs(tmp_path, template, expected_name, rooms):
+    datenbank_dir = tmp_path / "database"
+    output_root = tmp_path / "output"
+    variant_database = datenbank_dir / "Dimensionierung_nutzdaten"
+    variant_database.mkdir(parents=True)
+
+    hours = list(range(48))
+    for room_stub, offset in [("101_lobby", 0), ("109_office", 1)]:
+        pd.DataFrame(
+            {
+                "time": hours,
+                "local_de_comf_diag_t_top": [21 + offset + (hour % 24) * 0.05 for hour in hours],
+                "iaq_relhum": [45 + (hour % 24) * 0.2 for hour in hours],
+            }
+        ).to_csv(variant_database / f"{room_stub}.csv", index=False)
+
+    output_file = build_plot_template(
+        datenbank_dir=datenbank_dir,
+        output_root=output_root,
+        selected_variants=["Dimensionierung"],
+        rooms=rooms,
+        template=template,
+        run_id="comfort-templates",
+    )
+
+    output_path = Path(output_file)
+    assert output_path.exists()
+    assert output_path.stat().st_size > 1000
+    assert output_path.parts[-4:] == (
+        "PlotTemplates",
+        "comfort-templates",
+        "Dimensionierung",
+        expected_name,
+    )
+
+
+@pytest.mark.parametrize(
+    ("template", "expected_name"),
+    [
+        ("heating-bar", "heating_bar_template.png"),
+        ("cooling-bar", "cooling_bar_template.png"),
+    ],
+)
+def test_build_plot_template_creates_barplot_pngs(tmp_path, template, expected_name):
+    datenbank_dir = tmp_path / "database"
+    output_root = tmp_path / "output"
+    variant_database = datenbank_dir / "Dimensionierung_nutzdaten"
+    variant_database.mkdir(parents=True)
+
+    hours = list(range(48))
+    for room_stub, offset in [("101_lobby", 0), ("109_office", 100)]:
+        pd.DataFrame(
+            {
+                "time": hours,
+                "zone_energy_q_heat": [400 + offset if hour % 24 < 12 else 20 for hour in hours],
+                "zone_energy_q_cool": [300 + offset if 10 <= hour % 24 < 18 else 0 for hour in hours],
+            }
+        ).to_csv(variant_database / f"{room_stub}.csv", index=False)
+
+    output_file = build_plot_template(
+        datenbank_dir=datenbank_dir,
+        output_root=output_root,
+        selected_variants=["Dimensionierung"],
+        rooms=["101 lobby", "109 office"],
+        template=template,
+        run_id="bar-templates",
+    )
+
+    output_path = Path(output_file)
+    assert output_path.exists()
+    assert output_path.stat().st_size > 1000
+    assert output_path.parts[-4:] == (
+        "PlotTemplates",
+        "bar-templates",
+        "Dimensionierung",
+        expected_name,
+    )
+
+
+@pytest.mark.parametrize(
+    ("template", "expected_name", "kwargs"),
+    [
+        ("thermal-room-climate-year", "101_lobby_thermal_room_climate_year_template.png", {}),
+        ("thermal-room-climate-month", "101_lobby_thermal_room_climate_month_template.png", {"month": "Jan"}),
+        ("thermal-room-climate-week", "101_lobby_thermal_room_climate_week_template.png", {"week": 7}),
+        (
+            "thermal-room-climate-day",
+            "101_lobby_thermal_room_climate_day_template.png",
+            {"month": "Feb", "day": 15},
+        ),
+    ],
+)
+def test_build_plot_template_creates_thermal_room_climate_pngs(tmp_path, template, expected_name, kwargs):
+    datenbank_dir = tmp_path / "database"
+    input_dir = tmp_path / "input"
+    output_root = tmp_path / "output"
+    variant_database = datenbank_dir / "Dimensionierung_nutzdaten"
+    variant_input = input_dir / "Dimensionierung"
+    variant_database.mkdir(parents=True)
+    variant_input.mkdir(parents=True)
+
+    hours = list(range(1200))
+    pd.DataFrame(
+        {
+            "time": hours,
+            "zone_energy_q_light": [120 if 7 <= hour % 24 < 19 else 0 for hour in hours],
+            "zone_energy_q_occ": [80 if 8 <= hour % 24 < 17 else 0 for hour in hours],
+            "zone_energy_q_equip": [60 if 6 <= hour % 24 < 22 else 15 for hour in hours],
+            "zone_energy_qventil": [-80 if hour % 24 < 6 else 120 for hour in hours],
+            "zone_energy_q_cool": [280 if 12 <= hour % 24 < 18 else 0 for hour in hours],
+            "temperatures_tairmean": [21 + (hour % 24) * 0.15 for hour in hours],
+        }
+    ).to_csv(variant_database / "101_lobby.csv", index=False)
+    report_lines = ["# time order tair tout"]
+    for hour in hours:
+        report_lines.append(f"{hour}.0 1.0 {6 + (hour % 24) * 0.6} {5 + (hour % 24) * 0.4}")
+    (variant_input / "REPORT-AUX.prn").write_text("\n".join(report_lines), encoding="utf-8")
+
+    output_file = build_plot_template(
+        datenbank_dir=datenbank_dir,
+        input_dir=input_dir,
+        output_root=output_root,
+        selected_variants=["Dimensionierung"],
+        rooms=["101 lobby"],
+        template=template,
+        run_id="thermal-room-climate",
+        **kwargs,
+    )
+
+    output_path = Path(output_file)
+    assert output_path.exists()
+    assert output_path.stat().st_size > 1000
+    assert output_path.parts[-4:] == (
+        "PlotTemplates",
+        "thermal-room-climate",
+        "Dimensionierung",
+        expected_name,
+    )
+
+
 def test_heating_year_overlay_catalog_lists_csv_and_aux_columns(tmp_path):
     datenbank_dir = tmp_path / "database"
     input_dir = tmp_path / "input"
@@ -235,6 +644,63 @@ def test_build_heating_year_template_accepts_free_csv_and_aux_overlays(tmp_path)
             },
         ],
         run_id="free-overlays",
+    )
+
+    output_path = Path(output_file)
+    assert output_path.exists()
+    assert output_path.stat().st_size > 1000
+
+
+def test_build_heating_year_template_uses_configured_fixed_overlays(tmp_path):
+    datenbank_dir = tmp_path / "database"
+    input_dir = tmp_path / "input"
+    output_root = tmp_path / "output"
+    variant_database = datenbank_dir / "Dimensionierung_nutzdaten"
+    variant_input = input_dir / "Dimensionierung"
+    variant_database.mkdir(parents=True)
+    variant_input.mkdir(parents=True)
+
+    hours = list(range(48))
+    pd.DataFrame(
+        {
+            "time": hours,
+            "zone_energy_q_heat": [1000 if hour < 12 else 0 for hour in hours],
+            "custom_operativ": [21.0 + (hour % 24) * 0.05 for hour in hours],
+        }
+    ).to_csv(variant_database / "101_lobby.csv", index=False)
+    report_lines = ["# time order tamb"]
+    for hour in hours:
+        report_lines.append(f"{hour}.0 1.0 {4 + hour * 0.1}")
+    (variant_input / "REPORT-AUX.prn").write_text("\n".join(report_lines), encoding="utf-8")
+
+    fixed_overlays = [
+        {
+            "id": "outdoor_temperature",
+            "label": "Aussenluft konfiguriert",
+            "source": "aux",
+            "column": "tamb",
+            "axis": "temperature",
+            "enabled": True,
+        },
+        {
+            "id": "operative_temperature",
+            "label": "Operativ konfiguriert",
+            "source": "csv",
+            "column": "custom_operativ",
+            "axis": "temperature",
+            "enabled": True,
+        },
+    ]
+
+    output_file = build_heating_year_template(
+        datenbank_dir=datenbank_dir,
+        input_dir=input_dir,
+        output_root=output_root,
+        selected_variants=["Dimensionierung"],
+        rooms=["101 lobby"],
+        outdoor_column="tair",
+        fixed_overlays=fixed_overlays,
+        run_id="fixed-overlays",
     )
 
     output_path = Path(output_file)

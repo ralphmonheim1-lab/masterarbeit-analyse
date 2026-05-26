@@ -9,6 +9,8 @@ from pathlib import Path
 from ..core.config import PLOT_TEMPLATES_CONFIG
 
 HEATING_YEAR_KEY = "heating_year"
+OUTDOOR_OVERLAY_ID = "outdoor_temperature"
+OPERATIVE_OVERLAY_ID = "operative_temperature"
 
 DEFAULT_PLOT_TEMPLATE_CONFIG = {
     HEATING_YEAR_KEY: {
@@ -92,6 +94,7 @@ def _merge_heating_year_config(loaded):
         return defaults
 
     config = defaults.copy()
+    has_explicit_outdoor_column = "outdoor_column" in loaded
     config["setpoint_min"] = _as_float(loaded.get("setpoint_min"), defaults["setpoint_min"])
     config["setpoint_max"] = _as_float(loaded.get("setpoint_max"), defaults["setpoint_max"])
     config["temperature_ymin"] = _as_float(loaded.get("temperature_ymin"), defaults["temperature_ymin"])
@@ -116,6 +119,13 @@ def _merge_heating_year_config(loaded):
         overlays = [item for item in overlays if item is not None]
         if overlays:
             config["default_overlays"] = overlays
+            if not has_explicit_outdoor_column:
+                outdoor_overlay = next(
+                    (item for item in overlays if item.get("id") == OUTDOOR_OVERLAY_ID),
+                    None,
+                )
+                if outdoor_overlay is not None:
+                    config["outdoor_column"] = outdoor_overlay["column"]
     return config
 
 
@@ -142,6 +152,8 @@ def get_heating_year_template_defaults(config_path=PLOT_TEMPLATES_CONFIG):
 __all__ = [
     "DEFAULT_PLOT_TEMPLATE_CONFIG",
     "HEATING_YEAR_KEY",
+    "OPERATIVE_OVERLAY_ID",
+    "OUTDOOR_OVERLAY_ID",
     "get_heating_year_template_defaults",
     "load_plot_template_config",
 ]

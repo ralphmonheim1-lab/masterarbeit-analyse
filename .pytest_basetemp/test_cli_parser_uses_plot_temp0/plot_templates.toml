@@ -1,0 +1,17 @@
+[heating_year]
+setpoint_min = 19.0
+setpoint_max = 24.0
+temperature_ymin = -10.0
+temperature_ymax = 32.0
+show_setpoint_band = false
+show_outdoor_temperature = true
+show_operative_temperature = false
+outdoor_column = "tout"
+
+[[heating_year.default_overlays]]
+id = "outdoor_temperature"
+label = "Aussenluft tout"
+source = "aux"
+column = "tout"
+axis = "temperature"
+enabled = true

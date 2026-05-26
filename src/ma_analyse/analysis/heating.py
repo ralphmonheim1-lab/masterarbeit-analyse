@@ -26,6 +26,7 @@ from matplotlib.patches import FancyArrowPatch
 
 from ..core.config import COMBINED_HEATING_OUTPUT_DIR, DATENBANK_DIR, ROOMS
 from .components.figures import get_figure_size_inches
+from .components.heating_year_layout import draw_heating_year_line_plot
 from .components.rooms import get_room_data_file
 from .components.runtime import annotate_timestamp, get_run_id
 from .components.time_windows import MONTH_NAMES, filter_time_window, get_time_window
@@ -229,9 +230,13 @@ def add_timeline_axis(figure, ax, axis_config):
     )
     timeline_ax.add_patch(arrow)
 
+    for tick in axis_config.get("grid_ticks", axis_config["ticks"]):
+        tick_line = timeline_ax.vlines(tick, line_y, line_y + 0.10, color=TECHNICAL_TEXT_COLOR, linewidth=0.7)
+        tick_line.set_clip_on(False)
+
     x_start, x_end = axis_config["x_lim"]
     for tick, label in zip(axis_config["ticks"], axis_config["labels"], strict=False):
-        tick_line = timeline_ax.vlines(tick, line_y - 0.07, line_y + 0.07, color=TECHNICAL_TEXT_COLOR, linewidth=0.8)
+        tick_line = timeline_ax.vlines(tick, line_y - 0.10, line_y, color=TECHNICAL_TEXT_COLOR, linewidth=0.8)
         tick_line.set_clip_on(False)
         if tick == x_start:
             label_align = "left"
@@ -378,14 +383,14 @@ def plot_yearly_single_variant(room_data, variant_name, output_dir, debug=False)
     plot_df = pd.concat(rows, ignore_index=True)
     os.makedirs(output_dir, exist_ok=True)
     plot_file = os.path.join(output_dir, build_variant_plot_filename("year"))
-    draw_technical_line_plot(
+    draw_heating_year_line_plot(
         plot_df,
         x_col="time",
         group_col="room",
         title=f"Heating Jahresansicht - {variant_name}",
         subtitle=build_plot_subtitle("year"),
-        axis_config=build_time_axis_config("year"),
         output_file=plot_file,
+        line_colors=HEATING_LINE_COLORS,
     )
     print(f"Plot gespeichert: {plot_file}")
     return 1
@@ -540,17 +545,27 @@ def plot_single_room_time_series(
         return 0
 
     os.makedirs(output_dir, exist_ok=True)
-    draw_technical_line_plot(
-        plot_df,
-        x_col="time_axis",
-        group_col="series",
-        title=f"Heating Jahresansicht - {variant_name} / {room}"
-        if view == "year"
-        else f"Heizlastverlauf - {variant_name} - {room}",
-        subtitle=subtitle,
-        axis_config=axis_config,
-        output_file=plot_file,
-    )
+    if view == "year":
+        draw_heating_year_line_plot(
+            plot_df,
+            x_col="time_axis",
+            group_col="series",
+            title=f"Heating Jahresansicht - {variant_name} / {room}",
+            subtitle=subtitle,
+            output_file=plot_file,
+            line_colors=HEATING_LINE_COLORS,
+            single_series_legend_label="Heizleistung",
+        )
+    else:
+        draw_technical_line_plot(
+            plot_df,
+            x_col="time_axis",
+            group_col="series",
+            title=f"Heizlastverlauf - {variant_name} - {room}",
+            subtitle=subtitle,
+            axis_config=axis_config,
+            output_file=plot_file,
+        )
     print(f"Plot gespeichert: {plot_file}")
     return 1
 
@@ -589,14 +604,14 @@ def plot_yearly_variant_comparison(room_data_by_variant, rooms, output_dir, debu
             output_dir,
             build_combined_plot_filename(room, "year"),
         )
-        draw_technical_line_plot(
+        draw_heating_year_line_plot(
             plot_df,
             x_col="time",
             group_col="variant",
             title=f"Heating Jahresansicht - {room}",
             subtitle=build_plot_subtitle("year"),
-            axis_config=build_time_axis_config("year"),
             output_file=plot_file,
+            line_colors=HEATING_LINE_COLORS,
         )
         print(f"Plot gespeichert: {plot_file}")
         created_count += 1

@@ -11,16 +11,19 @@ import pandas as pd
 matplotlib.use("Agg")
 
 import matplotlib.pyplot as plt
-from matplotlib.patches import FancyArrowPatch, Patch
+from matplotlib.patches import Patch
 
 from ...core.config import DATENBANK_DIR, INPUT_DIR, TEST_OUTPUT_DIR
+from ...settings.plot_templates import OPERATIVE_OVERLAY_ID, OUTDOOR_OVERLAY_ID
 from ..components.figures import get_figure_size_inches
+from ..components.heating_year_layout import add_heating_year_timeline_axis, style_heating_year_power_axis
 from ..components.rooms import get_room_data_file
 from ..components.runtime import annotate_timestamp, get_run_id, sanitize_file_name
-from ..components.time_windows import MONTH_BOUNDARIES, MONTH_NAMES, MONTH_START_HOURS, build_energy_time_axis_config
+from ..components.time_windows import build_energy_time_axis_config
 from ..components.variants import get_variant_display_name, normalize_variant_name, strip_variant_suffix
+from .catalog import HEATING_YEAR_TEMPLATE, get_plot_template_spec, template_requires_single_room
+from .timeline import validate_timeline_template_time_selection
 
-HEATING_YEAR_TEMPLATE = "heating-year"
 REQUIRED_HEATING_COLUMN = "zone_energy_q_heat"
 OPERATIVE_TEMPERATURE_COLUMNS = ("temperatures_top", "local_de_comf_diag_t_top")
 DEFAULT_SETPOINT_MIN = 21.0
@@ -43,6 +46,27 @@ OPERATIVE_COLOR = "#2a9d8f"
 SETPOINT_BAND_COLOR = "#9ad29f"
 FREE_OVERLAY_COLORS = ["#7c3aed", "#f97316", "#0f766e", "#b91c1c", "#4b5563", "#a16207"]
 RESERVED_OVERLAY_COLUMNS = {"time", "room", REQUIRED_HEATING_COLUMN}
+DEFAULT_FIXED_OVERLAYS = [
+    {
+        "id": OUTDOOR_OVERLAY_ID,
+        "label": "Außenlufttemperatur",
+        "source": "aux",
+        "column": DEFAULT_OUTDOOR_COLUMN,
+        "axis": "temperature",
+        "enabled": True,
+        "color": OUTDOOR_COLOR,
+    },
+    {
+        "id": OPERATIVE_OVERLAY_ID,
+        "label": "Operative Temperatur",
+        "source": "csv",
+        "column": OPERATIVE_TEMPERATURE_COLUMNS[0],
+        "fallback_columns": [OPERATIVE_TEMPERATURE_COLUMNS[1]],
+        "axis": "temperature",
+        "enabled": True,
+        "color": OPERATIVE_COLOR,
+    },
+]
 
 
 def validate_template_request(
@@ -54,22 +78,79 @@ def validate_template_request(
     temperature_ymin: float,
     temperature_ymax: float,
     validate_setpoint_band: bool = True,
+    month: str | None = None,
+    week: int | None = None,
+    day: int | None = None,
 ) -> list[str]:
     """Prueft die fachlichen Mindestangaben fuer den Template-Lauf."""
     errors = []
-    if template != HEATING_YEAR_TEMPLATE:
+    spec = get_plot_template_spec(template)
+    if spec is None:
         errors.append(f"Unbekanntes Template: {template}")
     if not variants:
         errors.append("plot-template erwartet mindestens eine Variante.")
-    if not rooms or len(rooms) != 1:
-        errors.append("plot-template erwartet genau einen Raum.")
-    if validate_setpoint_band and setpoint_min >= setpoint_max:
-        errors.append("setpoint-min muss kleiner als setpoint-max sein.")
-    if temperature_ymin >= temperature_ymax:
-        errors.append("temperature-ymin muss kleiner als temperature-ymax sein.")
-    if validate_setpoint_band and (setpoint_min < temperature_ymin or setpoint_max > temperature_ymax):
-        errors.append("Das Sollwertband muss innerhalb der Temperaturachse liegen.")
+    if not rooms:
+        errors.append("plot-template erwartet mindestens einen Raum.")
+    elif template_requires_single_room(template) and len(rooms) != 1:
+        errors.append("Dieses plot-template erwartet genau einen Raum.")
+    if spec is not None and spec.name == HEATING_YEAR_TEMPLATE:
+        if validate_setpoint_band and setpoint_min >= setpoint_max:
+            errors.append("setpoint-min muss kleiner als setpoint-max sein.")
+        if temperature_ymin >= temperature_ymax:
+            errors.append("temperature-ymin muss kleiner als temperature-ymax sein.")
+        if validate_setpoint_band and (setpoint_min < temperature_ymin or setpoint_max > temperature_ymax):
+            errors.append("Das Sollwertband muss innerhalb der Temperaturachse liegen.")
+    errors.extend(validate_timeline_template_time_selection(template, month=month, week=week, day=day))
     return errors
+
+
+def _normalize_fixed_overlays(fixed_overlays: list[dict] | tuple[dict, ...] | None) -> dict[str, dict]:
+    """Normalisiert feste, per Config definierte Standard-Overlays nach ID."""
+    overlays = fixed_overlays if fixed_overlays is not None else DEFAULT_FIXED_OVERLAYS
+    color_by_id = {
+        OUTDOOR_OVERLAY_ID: OUTDOOR_COLOR,
+        OPERATIVE_OVERLAY_ID: OPERATIVE_COLOR,
+    }
+    normalized: dict[str, dict] = {}
+
+    for raw_overlay in overlays or []:
+        if not isinstance(raw_overlay, dict):
+            continue
+        overlay_id = str(raw_overlay.get("id", "")).strip()
+        source = str(raw_overlay.get("source", "")).strip().lower()
+        column = str(raw_overlay.get("column", "")).strip()
+        axis = str(raw_overlay.get("axis", "")).strip().lower()
+        if not overlay_id or source not in {"csv", "aux"} or axis not in {"heat", "temperature"} or not column:
+            continue
+
+        fallback_columns = raw_overlay.get("fallback_columns")
+        if isinstance(fallback_columns, list):
+            fallback_columns = [item.strip() for item in fallback_columns if isinstance(item, str) and item.strip()]
+        else:
+            fallback_columns = []
+
+        normalized[overlay_id] = {
+            "id": overlay_id,
+            "source": source,
+            "column": column.lower() if source == "aux" else column,
+            "label": str(raw_overlay.get("label") or column).strip(),
+            "axis": axis,
+            "enabled": bool(raw_overlay.get("enabled", True)),
+            "fallback_columns": fallback_columns,
+            "color": raw_overlay.get("color") or color_by_id.get(overlay_id, TEXT_COLOR),
+        }
+    return normalized
+
+
+def _get_fixed_overlay(
+    fixed_overlays: list[dict] | tuple[dict, ...] | None,
+    overlay_id: str,
+    enabled: bool,
+) -> dict | None:
+    overlay = _normalize_fixed_overlays(fixed_overlays).get(overlay_id)
+    if overlay is None or not enabled or not overlay.get("enabled", True):
+        return None
+    return overlay
 
 
 def _read_prn_file(file_path: str | Path) -> pd.DataFrame:
@@ -189,12 +270,15 @@ def list_heating_year_overlay_sources(
     variant_name: str,
     room_name: str,
     outdoor_column: str = DEFAULT_OUTDOOR_COLUMN,
+    fixed_overlays: list[dict] | tuple[dict, ...] | None = None,
 ) -> dict[str, list[str]]:
     """Listet frei auswaehlbare Overlay-Spalten aus Raum-CSV und REPORT-AUX."""
     processed_variant_dir = _resolve_processed_variant_dir(datenbank_dir, variant_name)
     input_variant_dir = _resolve_input_variant_dir(input_dir, variant_name)
     room_file = get_room_data_file(processed_variant_dir, room_name)
     report_aux_file = input_variant_dir / "REPORT-AUX.prn"
+    outdoor_overlay = _get_fixed_overlay(fixed_overlays, OUTDOOR_OVERLAY_ID, enabled=True)
+    resolved_outdoor_column = outdoor_overlay["column"] if outdoor_overlay is not None else outdoor_column
 
     if not os.path.exists(room_file):
         raise FileNotFoundError(f"Raum-CSV nicht gefunden: {room_file}")
@@ -203,17 +287,33 @@ def list_heating_year_overlay_sources(
 
     return {
         "csv": _list_numeric_csv_columns(room_file),
-        "aux": _list_aux_columns(report_aux_file, reserved_columns={outdoor_column.lower()}),
+        "aux": _list_aux_columns(report_aux_file, reserved_columns={resolved_outdoor_column.lower()}),
     }
 
 
-def _load_room_template_data(csv_file: str | Path, require_operative: bool = True) -> pd.DataFrame:
+def _resolve_csv_overlay_column(df: pd.DataFrame, overlay: dict | None, fallback_columns=()) -> str | None:
+    if overlay is None:
+        candidates = list(fallback_columns)
+    else:
+        candidates = [overlay["column"], *overlay.get("fallback_columns", [])]
+    return next((column for column in candidates if column in df.columns), None)
+
+
+def _load_room_template_data(
+    csv_file: str | Path,
+    operative_overlay: dict | None = None,
+    require_operative: bool = True,
+) -> pd.DataFrame:
     df = pd.read_csv(csv_file)
     missing_columns = [column for column in ("time", REQUIRED_HEATING_COLUMN) if column not in df.columns]
     if missing_columns:
         raise ValueError(f"Fehlende Spalten in {csv_file}: {missing_columns}")
 
-    operative_column = next((column for column in OPERATIVE_TEMPERATURE_COLUMNS if column in df.columns), None)
+    operative_column = _resolve_csv_overlay_column(
+        df,
+        operative_overlay,
+        fallback_columns=OPERATIVE_TEMPERATURE_COLUMNS,
+    )
     if operative_column is None and require_operative:
         raise ValueError(f"Keine operative Temperaturspalte in {csv_file} gefunden.")
 
@@ -276,6 +376,7 @@ def _build_template_dataframe(
     show_outdoor_temperature: bool = DEFAULT_SHOW_OUTDOOR_TEMPERATURE,
     show_operative_temperature: bool = DEFAULT_SHOW_OPERATIVE_TEMPERATURE,
     overlay_lines: list[dict] | tuple[dict, ...] | None = None,
+    fixed_overlays: list[dict] | tuple[dict, ...] | None = None,
 ) -> tuple[pd.DataFrame, str]:
     processed_variant_dir = _resolve_processed_variant_dir(datenbank_dir, variant_name)
     input_variant_dir = _resolve_input_variant_dir(input_dir, variant_name)
@@ -284,7 +385,13 @@ def _build_template_dataframe(
         raise FileNotFoundError(f"Raum-CSV nicht gefunden: {room_file}")
 
     normalized_overlays = _normalize_overlay_lines(overlay_lines)
-    room_df = _load_room_template_data(room_file, require_operative=show_operative_temperature)
+    outdoor_overlay = _get_fixed_overlay(fixed_overlays, OUTDOOR_OVERLAY_ID, show_outdoor_temperature)
+    operative_overlay = _get_fixed_overlay(fixed_overlays, OPERATIVE_OVERLAY_ID, show_operative_temperature)
+    room_df = _load_room_template_data(
+        room_file,
+        operative_overlay=operative_overlay,
+        require_operative=show_operative_temperature and operative_overlay is not None,
+    )
     for overlay in normalized_overlays:
         if overlay["source"] != "csv":
             continue
@@ -293,8 +400,8 @@ def _build_template_dataframe(
 
     report_aux_file = input_variant_dir / "REPORT-AUX.prn"
     aux_columns = []
-    if show_outdoor_temperature:
-        aux_columns.append(outdoor_column)
+    if outdoor_overlay is not None:
+        aux_columns.append(outdoor_overlay["column"])
     aux_columns.extend(overlay["column"] for overlay in normalized_overlays if overlay["source"] == "aux")
     aux_columns = list(dict.fromkeys(column.lower() for column in aux_columns if column))
 
@@ -304,8 +411,8 @@ def _build_template_dataframe(
             raise FileNotFoundError(f"REPORT-AUX.prn nicht gefunden: {report_aux_file}")
         outdoor_df = load_hourly_prn_columns(report_aux_file, aux_columns)
         rename_map = {}
-        if show_outdoor_temperature:
-            rename_map[outdoor_column.lower()] = "outdoor_temperature"
+        if outdoor_overlay is not None:
+            rename_map[outdoor_overlay["column"].lower()] = "outdoor_temperature"
         for overlay in normalized_overlays:
             if overlay["source"] == "aux":
                 rename_map.setdefault(overlay["column"], f"aux__{overlay['column']}")
@@ -316,65 +423,16 @@ def _build_template_dataframe(
 
 def _add_year_timeline_axis(figure, axis_config, timeline_bottom=0.145):
     """Zeichnet den separaten Jahres-Zeitstrahl wie in den Heating-Zeitplots."""
-    timeline_ax = figure.add_axes([0.08, timeline_bottom, 0.84, 0.12])
-    timeline_ax.set_facecolor("white")
-    timeline_ax.set_xlim(axis_config["x_lim"])
-    timeline_ax.set_ylim(0, 1)
-    timeline_ax.axis("off")
-
-    line_y = 0.55
-    arrow = FancyArrowPatch(
-        (0.0, line_y),
-        (1.02, line_y),
-        transform=timeline_ax.transAxes,
-        arrowstyle="->",
-        mutation_scale=14,
-        linewidth=1.3,
-        color="black",
-        clip_on=False,
-    )
-    timeline_ax.add_patch(arrow)
-
-    x_start, x_end = axis_config["x_lim"]
-    upper_ticks = axis_config.get("grid_ticks", axis_config["ticks"])
-    lower_ticks = axis_config["ticks"]
-    lower_labels = axis_config["labels"]
-
-    for tick in upper_ticks:
-        tick_line = timeline_ax.vlines(tick, line_y, line_y + 0.12, color="black", linewidth=1.0)
-        tick_line.set_clip_on(False)
-
-    for tick, label in zip(lower_ticks, lower_labels, strict=False):
-        tick_line = timeline_ax.vlines(tick, line_y - 0.10, line_y, color="black", linewidth=1.0)
-        tick_line.set_clip_on(False)
-        if tick == x_start:
-            label_align = "left"
-        elif tick == x_end:
-            label_align = "right"
-        else:
-            label_align = "center"
-        timeline_ax.text(tick, line_y - 0.22, label, ha=label_align, va="top", fontsize=9, color="black")
-
-    month_centers = [
-        MONTH_START_HOURS[index] + ((MONTH_BOUNDARIES[index] - MONTH_START_HOURS[index]) / 2)
-        for index in range(len(MONTH_NAMES))
-    ]
-    for tick, label in zip(month_centers, MONTH_NAMES, strict=False):
-        timeline_ax.text(tick, line_y + 0.20, label, ha="center", va="bottom", fontsize=9, fontweight="bold")
+    return add_heating_year_timeline_axis(figure, axis_config, timeline_bottom=timeline_bottom)
 
 
 def _style_main_axes(ax_heat, ax_temp, axis_config, temperature_ymin, temperature_ymax, heat_ymin=0, heat_ylabel=None):
-    ax_heat.set_facecolor(PLOT_BG)
-    ax_heat.set_xlim(axis_config["x_lim"])
-    ax_heat.set_ylim(bottom=heat_ymin)
-    ax_heat.set_ylabel(heat_ylabel or "Heizleistung [W]", fontsize=10, color=TEXT_COLOR)
-    ax_heat.set_xticks(axis_config.get("grid_ticks", axis_config["ticks"]))
-    ax_heat.set_xticklabels([])
-    ax_heat.tick_params(axis="x", length=0, labelbottom=False)
-    ax_heat.tick_params(axis="y", colors=TEXT_COLOR, labelsize=9)
-    ax_heat.grid(True, which="major", axis="both", color=GRID_COLOR, linewidth=0.9)
-    for boundary_tick in axis_config.get("boundary_ticks", []):
-        ax_heat.axvline(boundary_tick, color=SPINE_COLOR, linewidth=1.0, alpha=0.55)
+    style_heating_year_power_axis(
+        ax_heat,
+        axis_config,
+        heat_ymin=heat_ymin,
+        heat_ylabel=heat_ylabel or "Heizleistung [W]",
+    )
 
     ax_temp.set_ylim(temperature_ymin, temperature_ymax)
     ax_temp.set_ylabel("Temperatur [°C]", fontsize=10, color=TEXT_COLOR)
@@ -382,10 +440,9 @@ def _style_main_axes(ax_heat, ax_temp, axis_config, temperature_ymin, temperatur
     if temperature_ymin == -20 and temperature_ymax == 40:
         ax_temp.set_yticks([-20, -10, 0, 10, 20, 30, 40])
 
-    for axis in (ax_heat, ax_temp):
-        for spine in axis.spines.values():
-            spine.set_color(SPINE_COLOR)
-            spine.set_linewidth(1.1)
+    for spine in ax_temp.spines.values():
+        spine.set_color(SPINE_COLOR)
+        spine.set_linewidth(1.1)
 
 
 def _draw_heating_year_template(
@@ -401,6 +458,7 @@ def _draw_heating_year_template(
     show_outdoor_temperature: bool = DEFAULT_SHOW_OUTDOOR_TEMPERATURE,
     show_operative_temperature: bool = DEFAULT_SHOW_OPERATIVE_TEMPERATURE,
     overlay_lines: list[dict] | tuple[dict, ...] | None = None,
+    fixed_overlays: list[dict] | tuple[dict, ...] | None = None,
 ):
     axis_config = build_energy_time_axis_config("year")
     figure, ax_heat = plt.subplots(figsize=get_figure_size_inches("heating.timeline.single.png", (12.8, 7.2)))
@@ -440,27 +498,29 @@ def _draw_heating_year_template(
 
     temperature_axis_used = show_setpoint_band
     heat_axis_extra_used = False
-    if show_outdoor_temperature and "outdoor_temperature" in plot_df.columns:
+    outdoor_overlay = _get_fixed_overlay(fixed_overlays, OUTDOOR_OVERLAY_ID, show_outdoor_temperature)
+    operative_overlay = _get_fixed_overlay(fixed_overlays, OPERATIVE_OVERLAY_ID, show_operative_temperature)
+    if outdoor_overlay is not None and "outdoor_temperature" in plot_df.columns:
         outdoor_line = ax_temp.plot(
             plot_df["time"],
             plot_df["outdoor_temperature"],
-            color=OUTDOOR_COLOR,
+            color=outdoor_overlay["color"],
             linewidth=1.0,
             alpha=0.95,
-            label="Außenlufttemperatur",
+            label=outdoor_overlay["label"],
             zorder=2,
         )[0]
         handles.append(outdoor_line)
         temperature_axis_used = True
 
-    if show_operative_temperature and "operative_temperature" in plot_df.columns:
+    if operative_overlay is not None and "operative_temperature" in plot_df.columns:
         operative_line = ax_temp.plot(
             plot_df["time"],
             plot_df["operative_temperature"],
-            color=OPERATIVE_COLOR,
+            color=operative_overlay["color"],
             linewidth=1.1,
             alpha=0.95,
-            label="Operative Temperatur",
+            label=operative_overlay["label"],
             zorder=2,
         )[0]
         handles.append(operative_line)
@@ -561,6 +621,7 @@ def build_heating_year_template(
     show_outdoor_temperature: bool = DEFAULT_SHOW_OUTDOOR_TEMPERATURE,
     show_operative_temperature: bool = DEFAULT_SHOW_OPERATIVE_TEMPERATURE,
     overlay_lines: list[dict] | tuple[dict, ...] | None = None,
+    fixed_overlays: list[dict] | tuple[dict, ...] | None = None,
     run_id: str | None = None,
     debug: bool = False,
 ) -> str | list[str]:
@@ -593,6 +654,7 @@ def build_heating_year_template(
             show_outdoor_temperature=show_outdoor_temperature,
             show_operative_temperature=show_operative_temperature,
             overlay_lines=overlay_lines,
+            fixed_overlays=fixed_overlays,
         )
         if plot_df.empty:
             raise ValueError(f"Keine Daten fuer {variant_name} / {room_name} gefunden.")
@@ -605,7 +667,8 @@ def build_heating_year_template(
             print(f"Template-Variante: {variant_name}")
             print(f"Template-Datenpunkte: {len(plot_df)}")
             if show_outdoor_temperature:
-                print(f"Außenluft-Spalte: {outdoor_column}")
+                outdoor_overlay = _get_fixed_overlay(fixed_overlays, OUTDOOR_OVERLAY_ID, show_outdoor_temperature)
+                print(f"Außenluft-Spalte: {outdoor_overlay['column'] if outdoor_overlay else outdoor_column}")
             if overlay_lines:
                 print(f"Freie Overlay-Linien: {len(_normalize_overlay_lines(overlay_lines))}")
 
@@ -622,6 +685,7 @@ def build_heating_year_template(
             show_outdoor_temperature=show_outdoor_temperature,
             show_operative_temperature=show_operative_temperature,
             overlay_lines=overlay_lines,
+            fixed_overlays=fixed_overlays,
         )
         output_files.append(str(output_file))
 

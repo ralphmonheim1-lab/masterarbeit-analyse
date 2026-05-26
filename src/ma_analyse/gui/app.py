@@ -31,7 +31,12 @@ from ..analysis.templates import (
     DEFAULT_TEMPERATURE_YMAX,
     DEFAULT_TEMPERATURE_YMIN,
     HEATING_YEAR_TEMPLATE,
+    PLOT_TEMPLATE_CHOICES,
+    get_plot_template_spec,
+    is_time_filtered_template,
     list_heating_year_overlay_sources,
+    template_requires_single_room,
+    template_uses_overlay_options,
     validate_template_request,
 )
 from ..app.commands import build_runtime_args, execute_steps, get_comfort_output_settings, run_all
@@ -39,9 +44,15 @@ from ..core.config import DATENBANK_DIR, INPUT_DIR, OUTPUT_DIR, ROOMS
 from ..core.logging import command_log, should_log_command
 from ..settings.formats import ensure_output_format_doc
 from ..settings.naming import LEGACY_MAPPING_DOC as NAMENSMAPPING_DOC
-from ..settings.plot_templates import get_heating_year_template_defaults
+from ..settings.plot_templates import OPERATIVE_OVERLAY_ID, OUTDOOR_OVERLAY_ID, get_heating_year_template_defaults
 from .dialogs import OUTPUT_FORMAT_DOC, SettingsDialogMixin
-from .selection import format_cli_list, list_datenbank_variants, list_input_variants, strip_variant_suffix
+from .selection import (
+    format_cli_list,
+    list_datenbank_variants,
+    list_input_variants,
+    resolve_variant_list_state,
+    strip_variant_suffix,
+)
 from .singleton import (
     GUI_REFRESH_TIMEOUT_SECONDS,
     GUI_REPLACE_TIMEOUT_SECONDS,
@@ -52,6 +63,15 @@ from .singleton import (
 from .worker import QueueLogWriter
 
 DISABLED_GUI_COMMANDS = set()
+WINDOWS_APP_USER_MODEL_ID = "ma_analyse.gui"
+
+
+def _set_windows_app_user_model_id():
+    """Setzt unter Windows eine stabile App-ID fuer Taskleisten-Gruppierung."""
+    if os.name != "nt":
+        return
+    with contextlib.suppress(Exception):
+        ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(WINDOWS_APP_USER_MODEL_ID)
 
 
 def run_gui(args):
@@ -82,6 +102,7 @@ def run_gui(args):
             print("X Neue GUI konnte die vorhandene Instanz nicht abloesen.")
             return
 
+    _set_windows_app_user_model_id()
     root = tk.Tk()
     PipelineGUI(root, args, singleton_controller=controller)
     root.mainloop()
@@ -108,6 +129,7 @@ def run_gui_refresh(args):
         print("X Neue GUI konnte die Singleton-Rolle nicht uebernehmen.")
         raise SystemExit(1)
 
+    _set_windows_app_user_model_id()
     root = tk.Tk()
     gui = PipelineGUI(
         root,
@@ -255,6 +277,7 @@ class PipelineGUI(SettingsDialogMixin):
         }
         self.commands = list(self.command_to_steps.keys())
         self.plot_template_defaults = get_heating_year_template_defaults()
+        self.fixed_plot_overlays = self.plot_template_defaults.get("default_overlays", [])
 
         self.analysis_scope = tk.StringVar(value="")
         self.command = tk.StringVar(value="")
@@ -895,6 +918,43 @@ class PipelineGUI(SettingsDialogMixin):
         with contextlib.suppress(tk.TclError):
             self.root.overrideredirect(True)
             self.custom_window_chrome_enabled = True
+        self._ensure_windows_taskbar_button()
+        with contextlib.suppress(tk.TclError):
+            self.root.after(60, self._ensure_windows_taskbar_button)
+
+    def _ensure_windows_taskbar_button(self):
+        """Haelt das rahmenlose Tk-Fenster in der Windows-Taskleiste sichtbar."""
+        if os.name != "nt" or not self.root.winfo_exists():
+            return
+
+        with contextlib.suppress(Exception):
+            user32 = ctypes.windll.user32
+            window_handle = self.root.winfo_id()
+            taskbar_handle = user32.GetParent(window_handle) or window_handle
+
+            gwl_exstyle = -20
+            ws_ex_appwindow = 0x00040000
+            ws_ex_toolwindow = 0x00000080
+            swp_nosize = 0x0001
+            swp_nomove = 0x0002
+            swp_nozorder = 0x0004
+            swp_framechanged = 0x0020
+
+            get_window_long = getattr(user32, "GetWindowLongPtrW", user32.GetWindowLongW)
+            set_window_long = getattr(user32, "SetWindowLongPtrW", user32.SetWindowLongW)
+
+            style = get_window_long(taskbar_handle, gwl_exstyle)
+            style = (style | ws_ex_appwindow) & ~ws_ex_toolwindow
+            set_window_long(taskbar_handle, gwl_exstyle, style)
+            user32.SetWindowPos(
+                taskbar_handle,
+                0,
+                0,
+                0,
+                0,
+                0,
+                swp_nomove | swp_nosize | swp_nozorder | swp_framechanged,
+            )
 
     def _disable_custom_window_chrome(self):
         if not self.root.winfo_exists() or not self.custom_window_chrome_enabled:
@@ -1620,16 +1680,35 @@ class PipelineGUI(SettingsDialogMixin):
             self.plot_template,
             row=0,
             column=0,
-            values=[HEATING_YEAR_TEMPLATE],
+            values=PLOT_TEMPLATE_CHOICES,
         )
+        self.plot_template_combo.bind("<<ComboboxSelected>>", lambda event: self._update_dynamic_fields())
         self.plot_template_note = ttk.Label(
             self.plot_template_section,
-            text="Das Template nutzt eine oder mehrere Varianten und genau einen Raum. Zusatzlinien werden im Schritt Ueberlagerungen gewaehlt.",
+            text="Templates nutzen eine oder mehrere Varianten. Die meisten Templates erwarten genau einen Raum; Raumvergleich-Templates erlauben mehrere Raeume.",
             style="Muted.TLabel",
             wraplength=640,
             justify=tk.LEFT,
         )
         self.plot_template_note.pack(anchor=tk.W, pady=(8, 0))
+
+    def _get_fixed_plot_overlay(self, overlay_id, fallback=None):
+        for overlay in self.fixed_plot_overlays:
+            if isinstance(overlay, dict) and overlay.get("id") == overlay_id:
+                return overlay
+        return fallback or {}
+
+    def _format_fixed_overlay_source(self, overlay):
+        source = overlay.get("source", "")
+        column = overlay.get("column", "")
+        if source == "aux":
+            return f"REPORT-AUX.prn:{column}"
+        if source == "csv":
+            fallback_columns = overlay.get("fallback_columns", [])
+            if fallback_columns:
+                return f"{column}, Fallback {', '.join(fallback_columns)}"
+            return column
+        return column
 
     def _build_overlay_step(self):
         self.overlay_card, content = self._create_step_card(self.left_column, 5, "Überlagerungen")
@@ -1706,14 +1785,32 @@ class PipelineGUI(SettingsDialogMixin):
             column=1,
         )
 
-        for label_text, variable, detail in [
-            ("Außenlufttemperatur", self.plot_show_outdoor_temperature, "REPORT-AUX.prn:tair, rechte Achse"),
+        outdoor_overlay = self._get_fixed_plot_overlay(
+            OUTDOOR_OVERLAY_ID,
+            {"label": "Außenlufttemperatur", "source": "aux", "column": DEFAULT_OUTDOOR_COLUMN},
+        )
+        operative_overlay = self._get_fixed_plot_overlay(
+            OPERATIVE_OVERLAY_ID,
+            {
+                "label": "Operative Temperatur",
+                "source": "csv",
+                "column": "temperatures_top",
+                "fallback_columns": ["local_de_comf_diag_t_top"],
+            },
+        )
+        fixed_overlay_rows = [
             (
-                "Operative Temperatur",
-                self.plot_show_operative_temperature,
-                "temperatures_top, Fallback local_de_comf_diag_t_top, rechte Achse",
+                outdoor_overlay.get("label", "Außenlufttemperatur"),
+                self.plot_show_outdoor_temperature,
+                f"{self._format_fixed_overlay_source(outdoor_overlay)}, rechte Achse",
             ),
-        ]:
+            (
+                operative_overlay.get("label", "Operative Temperatur"),
+                self.plot_show_operative_temperature,
+                f"{self._format_fixed_overlay_source(operative_overlay)}, rechte Achse",
+            ),
+        ]
+        for label_text, variable, detail in fixed_overlay_rows:
             row = tk.Frame(
                 fixed_section,
                 bg=self.color_panel_light,
@@ -2024,7 +2121,17 @@ class PipelineGUI(SettingsDialogMixin):
         if card is self.step_3_card:
             selected_command = self.command.get()
             if selected_command == "plot-template":
-                return f"Template: {self.plot_template.get()}"
+                template_label = self.plot_template.get()
+                spec = get_plot_template_spec(template_label)
+                if spec is None or spec.view == "year":
+                    return f"Template: {template_label}"
+                if spec.view == "month":
+                    return f"Template: {template_label}, Monat {self.heating_month.get()}"
+                if spec.view == "week":
+                    return f"Template: {template_label}, KW {self.heating_week.get()}"
+                if spec.view == "day":
+                    return f"Template: {template_label}, {self.heating_day.get()}. {self.heating_month.get()}"
+                return f"Template: {template_label}"
             if selected_command == "comfort" and self.analysis_level.get():
                 return f"Analyseebene: {self.analysis_level.get()}"
             if selected_command == "analyze_data" and self.heating_series_layout.get():
@@ -2587,7 +2694,7 @@ class PipelineGUI(SettingsDialogMixin):
             "timeline",
         }
         hide_options_step = no_command or selected_command in {"prepare", "all"} or load_without_subcommand
-        show_overlays = selected_command == "plot-template"
+        show_overlays = selected_command == "plot-template" and template_uses_overlay_options(self.plot_template.get())
         self._set_card_visible(self.subcommand_card, show_subcommands)
         self._set_card_visible(self.prepare_export_card, is_prepare)
         self._set_card_visible(self.step_3_card, not hide_options_step)
@@ -2756,6 +2863,7 @@ class PipelineGUI(SettingsDialogMixin):
             return
 
         if load_active:
+            self._set_time_view_buttons_visible(True)
             self.load_mode_title.configure(text="Kuehlvergleich Modus" if cooling_active else "Heizvergleich Modus")
             self.load_view_title.configure(
                 text="Kuehlvergleich Ansichten" if cooling_active else "Heizvergleich Ansichten"
@@ -2778,6 +2886,13 @@ class PipelineGUI(SettingsDialogMixin):
 
         if selected_command == "plot-template":
             self.plot_template_section.pack(fill=tk.X)
+            spec = get_plot_template_spec(self.plot_template.get())
+            if spec is not None and is_time_filtered_template(self.plot_template.get()):
+                if self.heating_view.get() != spec.view:
+                    self.heating_view.set(spec.view)
+                self.load_view_title.configure(text="Template-Zeitwahl")
+                self._set_time_view_buttons_visible(False)
+                self.heating_view_section.pack(fill=tk.X, pady=(12, 0))
             return
 
         if comfort_active:
@@ -2796,6 +2911,20 @@ class PipelineGUI(SettingsDialogMixin):
             return
 
         self.analysis_section.pack(fill=tk.X)
+
+    def _set_time_view_buttons_visible(self, visible):
+        buttons_visible = bool(self.heating_time_view_buttons_section.winfo_manager())
+        if visible and not buttons_visible:
+            self.heating_time_view_buttons_section.pack(
+                side=tk.LEFT,
+                fill=tk.BOTH,
+                expand=True,
+                padx=(0, 20),
+                before=self.heating_view_detail_section,
+            )
+            return
+        if not visible and buttons_visible:
+            self.heating_time_view_buttons_section.pack_forget()
 
     def _update_comfort_options_for_analysis_level(self):
         allowed_values = self.comfort_allowed_by_level.get(
@@ -2819,7 +2948,13 @@ class PipelineGUI(SettingsDialogMixin):
 
     def _update_heating_detail_fields(self):
         selected_view = self.heating_view.get()
-        load_label = "Kuehlansicht" if self.command.get() == "cooling" else "Heizansicht"
+        if self.command.get() == "plot-template":
+            spec = get_plot_template_spec(self.plot_template.get())
+            if spec is not None:
+                selected_view = spec.view
+            load_label = "Template-Zeitansicht"
+        else:
+            load_label = "Kuehlansicht" if self.command.get() == "cooling" else "Heizansicht"
         self.heating_month_container.pack_forget()
         self.heating_week_container.pack_forget()
         self.heating_day_container.pack_forget()
@@ -2868,32 +3003,19 @@ class PipelineGUI(SettingsDialogMixin):
 
         scope = self.analysis_scope.get()
         previous_scope = self.last_variant_scope
-        self.variants_listbox.configure(state=tk.NORMAL)
-
-        if previous_scope == "Alle Varianten" and scope != "Alle Varianten":
-            self.variants_listbox.selection_clear(0, tk.END)
-
-        if scope == "Eine Variante":
-            self.variants_listbox.configure(selectmode=tk.BROWSE)
-            self._update_variant_note_state(scope)
-            self.last_variant_scope = scope
-            return
-
-        self.variants_listbox.configure(selectmode=tk.MULTIPLE)
-        if scope == "Mehrere Varianten":
-            self._update_variant_note_state(scope)
-            self.last_variant_scope = scope
-            return
-
-        if not scope:
-            self.variants_listbox.selection_clear(0, tk.END)
-            self._update_variant_note_state(scope)
-            self.last_variant_scope = scope
-            return
-
+        state = resolve_variant_list_state(
+            len(self.variant_names),
+            scope,
+            current_selection=self.variants_listbox.curselection(),
+            previous_scope=previous_scope,
+        )
+        selectmode = tk.BROWSE if state.selectmode == "browse" else tk.MULTIPLE
+        widget_state = tk.NORMAL if state.enabled else tk.DISABLED
+        self.variants_listbox.configure(state=tk.NORMAL, selectmode=selectmode)
         self.variants_listbox.selection_clear(0, tk.END)
-        self.variants_listbox.selection_set(0, tk.END)
-        self.variants_listbox.configure(state=tk.DISABLED)
+        for index in state.selected_indices:
+            self.variants_listbox.selection_set(index)
+        self.variants_listbox.configure(state=widget_state)
         self._update_variant_note_state(scope)
         self.last_variant_scope = scope
 
@@ -2965,12 +3087,17 @@ class PipelineGUI(SettingsDialogMixin):
 
     def _update_room_field(self):
         if self.command.get() == "plot-template":
-            self.rooms_listbox.configure(state=tk.NORMAL, selectmode=tk.BROWSE)
+            requires_single_room = template_requires_single_room(self.plot_template.get())
+            selectmode = tk.BROWSE if requires_single_room else tk.MULTIPLE
+            self.rooms_listbox.configure(state=tk.NORMAL, selectmode=selectmode)
             self._set_step_5_enabled(True)
             if not self.rooms_listbox.curselection():
                 self.room_note.configure(text="Fuer plot-template ist aktuell kein Raum ausgewaehlt.")
                 return
-            self.room_note.configure(text="plot-template nutzt genau einen Raum fuer die Diagrammvorlage.")
+            if requires_single_room:
+                self.room_note.configure(text="Dieses plot-template nutzt genau einen Raum fuer die Diagrammvorlage.")
+                return
+            self.room_note.configure(text="Dieses plot-template nutzt die ausgewaehlten Raeume fuer den Raumvergleich.")
             return
 
         if self.command.get() in {"heating", "cooling", "analyze_data", "all"}:
@@ -3107,14 +3234,23 @@ class PipelineGUI(SettingsDialogMixin):
 
     def _handle_room_selection_changed(self):
         if self.command.get() == "plot-template":
-            self.room_note.configure(text="plot-template nutzt genau einen Raum fuer die Diagrammvorlage.")
+            if template_requires_single_room(self.plot_template.get()):
+                self.room_note.configure(text="Dieses plot-template nutzt genau einen Raum fuer die Diagrammvorlage.")
+            else:
+                self.room_note.configure(
+                    text="Dieses plot-template nutzt die ausgewaehlten Raeume fuer den Raumvergleich."
+                )
         else:
             self._update_room_note_state(self.analysis_level.get())
         self._refresh_overlay_catalog()
         self._update_step_summaries()
 
     def _refresh_overlay_catalog(self):
-        if self.command.get() != "plot-template" or not hasattr(self, "overlay_column_combo"):
+        if (
+            self.command.get() != "plot-template"
+            or not template_uses_overlay_options(self.plot_template.get())
+            or not hasattr(self, "overlay_column_combo")
+        ):
             return
 
         variant_name = None
@@ -3141,6 +3277,7 @@ class PipelineGUI(SettingsDialogMixin):
                 variant_name,
                 room_name,
                 outdoor_column=self.plot_outdoor_column.get() or DEFAULT_OUTDOOR_COLUMN,
+                fixed_overlays=self.fixed_plot_overlays,
             )
         except Exception:
             self.overlay_catalog = {"csv": [], "aux": []}
@@ -3262,6 +3399,7 @@ class PipelineGUI(SettingsDialogMixin):
         self._sync_free_overlay_listbox()
 
         self._update_dynamic_fields()
+        self._activate_first_available_step()
 
     def _parse_heating_week(self):
         raw_value = self.heating_week.get().strip()
@@ -3313,7 +3451,28 @@ class PipelineGUI(SettingsDialogMixin):
             return None
 
     def _get_plot_template_options(self, variants, rooms):
-        if self.plot_show_setpoint_band.get():
+        template = self.plot_template.get()
+        spec = get_plot_template_spec(template)
+        uses_overlay_options = template_uses_overlay_options(template)
+        month = None
+        week = None
+        day = None
+
+        if spec is not None and spec.view in {"month", "day"}:
+            if self.heating_month.get() not in MONTH_NAMES:
+                messagebox.showwarning("Warnung", "Bitte waehlen Sie einen gueltigen Monat.")
+                return None
+            month = self.heating_month.get()
+        if spec is not None and spec.view == "week":
+            week = self._parse_heating_week()
+            if week is None:
+                return None
+        if spec is not None and spec.view == "day":
+            day = self._parse_heating_day()
+            if day is None:
+                return None
+
+        if uses_overlay_options and self.plot_show_setpoint_band.get():
             setpoint_min = self._parse_float_option(self.plot_setpoint_min.get(), "Sollwert min")
             if setpoint_min is None:
                 return None
@@ -3323,24 +3482,32 @@ class PipelineGUI(SettingsDialogMixin):
         else:
             setpoint_min = self.plot_template_defaults.get("setpoint_min", DEFAULT_SETPOINT_MIN)
             setpoint_max = self.plot_template_defaults.get("setpoint_max", DEFAULT_SETPOINT_MAX)
-        temperature_ymin = self._parse_float_option(self.plot_temperature_ymin.get(), "Temp.-Achse min")
-        if temperature_ymin is None:
-            return None
-        temperature_ymax = self._parse_float_option(self.plot_temperature_ymax.get(), "Temp.-Achse max")
-        if temperature_ymax is None:
-            return None
+        if uses_overlay_options:
+            temperature_ymin = self._parse_float_option(self.plot_temperature_ymin.get(), "Temp.-Achse min")
+            if temperature_ymin is None:
+                return None
+            temperature_ymax = self._parse_float_option(self.plot_temperature_ymax.get(), "Temp.-Achse max")
+            if temperature_ymax is None:
+                return None
+        else:
+            temperature_ymin = self.plot_template_defaults.get("temperature_ymin", DEFAULT_TEMPERATURE_YMIN)
+            temperature_ymax = self.plot_template_defaults.get("temperature_ymax", DEFAULT_TEMPERATURE_YMAX)
 
         options = {
-            "template": self.plot_template.get(),
+            "template": template,
             "setpoint_min": setpoint_min,
             "setpoint_max": setpoint_max,
             "temperature_ymin": temperature_ymin,
             "temperature_ymax": temperature_ymax,
             "outdoor_column": self.plot_outdoor_column.get().strip() or DEFAULT_OUTDOOR_COLUMN,
-            "show_setpoint_band": self.plot_show_setpoint_band.get(),
-            "show_outdoor_temperature": self.plot_show_outdoor_temperature.get(),
-            "show_operative_temperature": self.plot_show_operative_temperature.get(),
-            "overlay_lines": [line.copy() for line in self.free_overlay_lines],
+            "show_setpoint_band": self.plot_show_setpoint_band.get() if uses_overlay_options else False,
+            "show_outdoor_temperature": self.plot_show_outdoor_temperature.get() if uses_overlay_options else False,
+            "show_operative_temperature": self.plot_show_operative_temperature.get() if uses_overlay_options else False,
+            "overlay_lines": [line.copy() for line in self.free_overlay_lines] if uses_overlay_options else [],
+            "fixed_overlays": self.fixed_plot_overlays if uses_overlay_options else [],
+            "month": month,
+            "week": week,
+            "day": day,
         }
         errors = validate_template_request(
             options["template"],
@@ -3351,6 +3518,9 @@ class PipelineGUI(SettingsDialogMixin):
             options["temperature_ymin"],
             options["temperature_ymax"],
             validate_setpoint_band=options["show_setpoint_band"],
+            month=month,
+            week=week,
+            day=day,
         )
         if errors:
             messagebox.showwarning("Warnung", "\n".join(errors))

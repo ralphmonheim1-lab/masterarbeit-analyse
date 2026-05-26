@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+from dataclasses import dataclass
 
 from ..core.config import ROOMS
 
@@ -43,3 +44,33 @@ def strip_variant_suffix(variant_name):
         if variant_name.endswith(suffix):
             return variant_name[: -len(suffix)]
     return variant_name
+
+
+@dataclass(frozen=True)
+class VariantListState:
+    """Beschreibt den gewuenschten GUI-Zustand der Variantenliste."""
+
+    selectmode: str
+    selected_indices: tuple[int, ...]
+    enabled: bool
+
+
+def resolve_variant_list_state(variant_count, scope, current_selection=(), previous_scope=None):
+    """Ermittelt Varianten-Listbox-Zustand ohne Tk-Abhaengigkeit."""
+    if variant_count <= 0:
+        return VariantListState(selectmode="multiple", selected_indices=(), enabled=False)
+
+    valid_selection = tuple(index for index in current_selection if 0 <= index < variant_count)
+    if previous_scope == "Alle Varianten" and scope != "Alle Varianten":
+        valid_selection = ()
+
+    if scope == "Eine Variante":
+        return VariantListState(selectmode="browse", selected_indices=valid_selection[:1], enabled=True)
+
+    if scope == "Mehrere Varianten":
+        return VariantListState(selectmode="multiple", selected_indices=valid_selection, enabled=True)
+
+    if scope == "Alle Varianten":
+        return VariantListState(selectmode="multiple", selected_indices=tuple(range(variant_count)), enabled=False)
+
+    return VariantListState(selectmode="multiple", selected_indices=(), enabled=True)

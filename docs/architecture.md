@@ -31,6 +31,32 @@
 | `settings.formats` | Ausgabeformate lesen und bereitstellen; Dokument liegt daneben als `output_formats.md` |
 | `settings.plot_templates` | Plot-Template-Defaults aus `plot_templates.toml` lesen |
 
+## Plot-Template Promotion
+
+`plot-template` ist der Experimentierpfad fuer neue Plot-Ideen. Diese Ausgaben
+laufen standardmaessig nach `data/test_output/PlotTemplates/...` und duerfen
+schneller veraendert werden als die Hauptbefehle.
+
+Wenn eine Template-Idee in eine Hauptfunktion uebernommen wird, gilt die Methode
+**Geteilte Helper**:
+
+1. Neue Darstellung oder Datenlogik zuerst im Template sichtbar testen.
+2. Verhalten mit einem fokussierten Test oder Smoke-Test absichern.
+3. Wiederverwendbare Logik in ein neutrales Modul auslagern, bevorzugt unter
+   `analysis/components/` oder einem passenden Fachpaket.
+4. Template und Hauptfunktion nutzen danach denselben Helper.
+5. Keine experimentellen Overlay-, CLI- oder GUI-Optionen automatisch in
+   Hauptfunktionen uebernehmen; solche Optionen brauchen eine eigene bewusste
+   Promotion.
+
+Aktuelle Beispiele:
+
+- `analysis/components/heating_year_layout.py` enthaelt die geteilte
+  Jahreslayoutbasis fuer `plot-template heating-year` und die regulaere
+  Heating-Jahresansicht.
+- `analysis/templates/catalog.py` und `analysis/templates/timeline.py`
+  strukturieren die Template-Sandbox fuer Heating-/Cooling-Zeitansichten.
+
 ## Naechste Modularisierung
 
 - Heating und Cooling weiter in Energy-Runner, Datenladen und Plotmodule zerlegen.

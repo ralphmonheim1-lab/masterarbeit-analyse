@@ -16,6 +16,7 @@ from ..analysis.templates import (
     DEFAULT_TEMPERATURE_YMAX,
     DEFAULT_TEMPERATURE_YMIN,
     HEATING_YEAR_TEMPLATE,
+    PLOT_TEMPLATE_CHOICES,
 )
 from ..core.config import DATENBANK_DIR, EXPORT_FORMATS, INPUT_DIR, OUTPUT_DIR, ROOMS, TEST_OUTPUT_DIR
 from ..core.logging import command_log, should_log_command
@@ -54,15 +55,20 @@ def normalize_rooms(selected_rooms):
     raise SystemExit(1)
 
 
-def add_plot_template_arguments(parser, hide_help=False):
+def add_plot_template_arguments(parser, hide_help=False, config_path=None):
     """Ergaenzt Argumente fuer den Plot-Template-Befehl."""
     help_value = argparse.SUPPRESS if hide_help else None
-    template_defaults = get_heating_year_template_defaults()
+    template_defaults = (
+        get_heating_year_template_defaults(config_path)
+        if config_path is not None
+        else get_heating_year_template_defaults()
+    )
+    parser.set_defaults(fixed_overlays=template_defaults.get("default_overlays"))
     parser.add_argument(
         "--template",
-        choices=[HEATING_YEAR_TEMPLATE],
+        choices=PLOT_TEMPLATE_CHOICES,
         default=HEATING_YEAR_TEMPLATE,
-        help=help_value or "Diagrammvorlage, aktuell: heating-year",
+        help=help_value or "Diagrammvorlage fuer Plot-Template-Ausgaben",
     )
     parser.add_argument(
         "--setpoint-min",
@@ -116,7 +122,7 @@ def add_plot_template_arguments(parser, hide_help=False):
     )
 
 
-def build_parser():
+def build_parser(plot_template_config_path=None):
     """Definiert die zentrale CLI mit allen Befehlen und gemeinsamen Optionen."""
     parser = argparse.ArgumentParser(
         description="Zentraler Einstiegspunkt fuer Datenaufbereitung, Auswertung und GUI der Pipeline."
@@ -289,8 +295,15 @@ def build_parser():
         parents=[common],
         help="Erstellt manuell anpassbare Diagramm-Vorlagen",
     )
-    add_plot_template_arguments(plot_template_parser)
+    add_plot_template_arguments(plot_template_parser, config_path=plot_template_config_path)
     plot_template_parser.set_defaults(debug=True, output_root=TEST_OUTPUT_DIR)
+
+    plot_template_examples_parser = subparsers.add_parser(
+        "plot-template-examples",
+        parents=[common],
+        help="Erzeugt die stabile Beispielgalerie fuer alle Plot-Template-Ausgaben",
+    )
+    plot_template_examples_parser.set_defaults(debug=True)
 
     gui_parser = subparsers.add_parser(
         "gui",
@@ -303,7 +316,7 @@ def build_parser():
         default="csv",
         help="Startwert fuer das Prepare-Exportformat in der GUI",
     )
-    add_plot_template_arguments(gui_parser, hide_help=True)
+    add_plot_template_arguments(gui_parser, hide_help=True, config_path=plot_template_config_path)
     gui_parser.set_defaults(debug=True)
 
     all_parser = subparsers.add_parser(
