@@ -70,7 +70,7 @@ def add_heating_year_timeline_axis(figure, axis_config, timeline_bottom=0.145):
         for index in range(len(MONTH_NAMES))
     ]
     for tick, label in zip(month_centers, MONTH_NAMES, strict=False):
-        timeline_ax.text(tick, line_y + 0.20, label, ha="center", va="bottom", fontsize=9, fontweight="bold")
+        timeline_ax.text(tick, line_y + 0.20, label, ha="center", va="bottom", fontsize=9)
 
     return timeline_ax
 

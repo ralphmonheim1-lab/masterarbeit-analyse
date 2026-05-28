@@ -159,7 +159,7 @@ class SettingsDialogMixin:
         ttk.Label(parent, text="Formate", style="Heading.TLabel").pack(anchor=tk.W, padx=14, pady=(14, 8))
         ttk.Label(
             parent,
-            text="Verfuegbare feste Groessen",
+            text="Gängige Formate und Größen",
             style="Muted.TLabel",
             wraplength=260,
             justify=tk.LEFT,
@@ -170,19 +170,13 @@ class SettingsDialogMixin:
                 parent, bg=self.color_panel_light, highlightbackground=self.color_border, highlightthickness=1
             )
             item.pack(fill=tk.X, padx=14, pady=5)
-            ttk.Label(item, text=format_name, style="Dark.TLabel").pack(anchor=tk.W, padx=10, pady=(8, 2))
             if values["width_cm"] is None:
-                size_text = "ohne feste Groesse"
+                label_text = format_name
             else:
-                size_text = f"{values['width_cm']:g} cm x {values['height_cm']:g} cm"
-            ttk.Label(item, text=size_text, style="Muted.TLabel").pack(anchor=tk.W, padx=10)
-            ttk.Label(
-                item,
-                text=values["description"],
-                style="Muted.TLabel",
-                wraplength=240,
-                justify=tk.LEFT,
-            ).pack(anchor=tk.W, padx=10, pady=(2, 8))
+                label_text = f"{format_name} — {values['width_cm']:g} cm × {values['height_cm']:g} cm"
+            ttk.Label(item, text=label_text, style="Dark.TLabel", wraplength=260, justify=tk.LEFT).pack(
+                anchor=tk.W, padx=10, pady=10
+            )
 
     def _save_output_formats(self):
         if self.format_dialog is None or not self.format_dialog.winfo_exists():

@@ -7,6 +7,14 @@ Alle nennenswerten Aenderungen an `ma_analyse` werden in dieser Datei dokumentie
 ### Added
 - Keine aktuellen Unreleased-Änderungen.
 
+## 0.3.2 - 2026-05-28
+
+### Changed
+- Aktualisiert die Dokumentation der Plot-Template-Beispiele mit stabilen Referenzbildern unter `docs/examples/plot_templates/`.
+- Erweitert die Standard-Ausgabeformatverwaltung um kompakte Plot-Template-Formate und neue Internal-Loads-/Energy-Balance-/Thermal-Room-Climate-Ziele.
+- Verbessert die Benutzerführung im GUI-Dialog für Ausgabeformate.
+- Verfeinert die Beschriftung des Heating-Year-Zeitstrahls.
+
 ## 0.3.1 - 2026-05-26
 
 ### Added

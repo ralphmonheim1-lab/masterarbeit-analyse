@@ -35,7 +35,7 @@ Diese Hauptdatei enthaelt nur aktive, noch nicht abgeschlossene Punkte. Vollstae
 
 ## Kommentare und Hinweise
 
-- Versionierung am 2026-05-26 geklaert: Aktueller Paketstand ist `0.3.1`. `CHANGELOG.md` trennt `0.2.3` fuer Aenderungen vor `internal-loads-*` und `0.3.0` fuer Internal-Loads- sowie darauf folgende Template-Erweiterungen.
+- Versionierung am 2026-05-26 geklaert: Aktueller Paketstand ist `0.3.2`. `CHANGELOG.md` trennt `0.2.3` fuer Aenderungen vor `internal-loads-*` und `0.3.0` fuer Internal-Loads- sowie darauf folgende Template-Erweiterungen.
 
 ## Archiv
 

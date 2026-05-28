@@ -1,7 +1,8 @@
 # Plot-Template Beispiele
 
-Diese Galerie zeigt reproduzierbare Beispielausgaben fuer alle `plot-template`-Vorlagen.
-Die Beispielbilder werden unter `docs/examples/plot_templates/` abgelegt und beim erneuten Generieren mit `python -m ma_analyse plot-template-examples` ersetzt.
+Diese Galerie zeigt stabil erzeugte Beispielbilder und -dokumente fuer alle `plot-template`-Vorlagen.
+
+Die Bilder liegen unter `docs/examples/plot_templates/`.
 
 ## Heating
 
@@ -29,6 +30,7 @@ Die Beispielbilder werden unter `docs/examples/plot_templates/` abgelegt und bei
 
 ![heating-day](examples/plot_templates/heating-day.png)
 
+
 ## Cooling
 
 ### `cooling-year`
@@ -55,6 +57,7 @@ Die Beispielbilder werden unter `docs/examples/plot_templates/` abgelegt und bei
 
 ![cooling-day](examples/plot_templates/cooling-day.png)
 
+
 ## Barplots
 
 ### `heating-bar`
@@ -68,6 +71,7 @@ Die Beispielbilder werden unter `docs/examples/plot_templates/` abgelegt und bei
 **Beispielbefehl:** `python -m ma_analyse plot-template --template cooling-bar --variants Dimensionierung --rooms "101 lobby,109 office,113 meeting,208 office,214 meeting"`
 
 ![cooling-bar](examples/plot_templates/cooling-bar.png)
+
 
 ## Comfort
 
@@ -95,6 +99,7 @@ Die Beispielbilder werden unter `docs/examples/plot_templates/` abgelegt und bei
 
 [PDF-Ausgabe](examples/plot_templates/comfort-analysis-overview.pdf)
 
+
 ## Energy Balance
 
 ### `energy-balance-year`
@@ -120,6 +125,7 @@ Die Beispielbilder werden unter `docs/examples/plot_templates/` abgelegt und bei
 **Beispielbefehl:** `python -m ma_analyse plot-template --template energy-balance-day --variants Dimensionierung --rooms "208 office" --month Jul --day 20`
 
 ![energy-balance-day](examples/plot_templates/energy-balance-day.png)
+
 
 ## Internal Loads
 
@@ -159,6 +165,7 @@ Die Beispielbilder werden unter `docs/examples/plot_templates/` abgelegt und bei
 
 ![internal-loads-room-comparison](examples/plot_templates/internal-loads-room-comparison.png)
 
+
 ## Thermal Room Climate
 
 ### `thermal-room-climate-year`
@@ -184,3 +191,9 @@ Die Beispielbilder werden unter `docs/examples/plot_templates/` abgelegt und bei
 **Beispielbefehl:** `python -m ma_analyse plot-template --template thermal-room-climate-day --variants Dimensionierung --rooms "208 office" --month Jul --day 20`
 
 ![thermal-room-climate-day](examples/plot_templates/thermal-room-climate-day.png)
+
+
+---
+
+Diese Beispiele werden reproduzierbar mit dem Befehl `python -m ma_analyse plot-template-examples` erzeugt.
+Wenn sich das Aussehen von Plot-Templates aendert, ersetzen neue Generierungsläufe die vorhandenen Dateien.
